@@ -13,13 +13,13 @@ async function api(path, { method = 'GET', body } = {}) {
     method,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + (localStorage.token || '')
+      Authorization: 'Bearer ' + (localStorage.client_token || '')
     },
     body: body && JSON.stringify(body)
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && localStorage.token) {
-    localStorage.removeItem('token');
+  if (r.status === 401 && localStorage.client_token) {
+    localStorage.removeItem('client_token');
     location.reload();
   }
   if (!r.ok) throw new Error(j.error || 'Erreur serveur');
@@ -212,1886 +212,146 @@ function QuotaItem({ label, used = 0, max = 1, unit = '', color = 'var(--primary
   );
 }
 
+
 /* ============================================================================
- * AUTHENTICATION (AVEC CHOIX EXPLICITE : PARTIE C-PANEL vs PARTIE CLIENT)
+ * CONNEXION ESPACE CLIENT (UNIQUEMENT LE FORMULAIRE DE CONNEXION)
  * ========================================================================== */
-function Login({ onDone }) {
-  const [portalChoice, setPortalChoice] = useState('cpanel'); // 'cpanel' | 'client'
+function ClientLogin({ onDone }) {
   const [mode, setMode] = useState('login');
-  const [f, setF] = useState({
-    company: '',
-    email: '',
-    password: ''
-  });
+  const [company, setCompany] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPwd, setShowPwd] = useState(false);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const set = k => e => setF({ ...f, [k]: e.target.value });
-
-  const switchPortal = target => {
-    setPortalChoice(target);
-    setErr('');
-    if (target === 'cpanel') {
-      setMode('login');
-    }
-    setF({ company: '', email: '', password: '' });
-  };
-
-  const submit = async customBody => {
+  const submit = async e => {
+    e.preventDefault();
     setErr('');
     setLoading(true);
     try {
-      const payload = customBody || f;
+      const payload =
+        mode === 'register'
+          ? { company: company.trim(), email: email.trim(), password }
+          : { email: email.trim(), password };
       const r = await api(`/auth/${mode}`, { method: 'POST', body: payload });
-      localStorage.token = r.token;
-      localStorage.userEmail = r.email || payload.email;
-      localStorage.userRole = r.role || 'client';
-      localStorage.removeItem('adminTokenBackup');
-      onDone(r.role === 'superadmin' && portalChoice === 'cpanel' ? 'cpanel' : 'client');
-    } catch (e) {
-      setErr(e.message);
+      localStorage.client_token = r.token;
+      localStorage.client_email = r.email || email.trim();
+      onDone();
+    } catch (e2) {
+      setErr(e2.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="auth-layout">
-      <div className="auth-aside">
-        <div className="brand-lockup">
+    <main className="auth-centered">
+      <div className="auth-box">
+        <div className="auth-brand-center">
           <div className="brand-mark-box">R</div>
           <span>Rayons CRM</span>
         </div>
 
-        <div className="auth-pitch">
-          <span className="auth-eyebrow">Architecture SaaS à Deux Portails</span>
-          <h1>Une console C-Panel pour l'administrateur, un espace CRM dédié pour chaque client.</h1>
-          <p>
-            Rayons CRM sépare strictement l'administration de votre infrastructure télécom
-            (C-Panel) et l'application quotidienne utilisée par vos entreprises clientes
-            (Espace Client).
-          </p>
-          <div className="auth-features">
-            <div className="auth-feature-item">
-              <strong>1. Partie C-Panel (Admin SaaS)</strong>
-              <span>Création de clients, attribution des quotas, rechargement de crédits et routes télécoms maîtresses</span>
-            </div>
-            <div className="auth-feature-item">
-              <strong>2. Partie Client (Espace CRM)</strong>
-              <span>Import CSV de contacts, ciblage par opérateur/segment, modèles de messages, email direct et clé API</span>
-            </div>
-          </div>
+        <div className="segmented" style={{ marginTop: 18, marginBottom: 18 }}>
+          <button
+            type="button"
+            className={mode === 'login' ? 'active' : ''}
+            onClick={() => {
+              setMode('login');
+              setErr('');
+            }}
+          >
+            Connexion
+          </button>
+          <button
+            type="button"
+            className={mode === 'register' ? 'active' : ''}
+            onClick={() => {
+              setMode('register');
+              setErr('');
+            }}
+          >
+            Créer un compte
+          </button>
         </div>
 
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
-          Rayons CRM — C-Panel SaaS & Portail Client
-        </div>
-      </div>
-
-      <div className="auth-main">
-        <div className="auth-box">
-          <div className="segmented" style={{ marginTop: 0, marginBottom: 18 }}>
-            <button
-              type="button"
-              className={portalChoice === 'cpanel' ? 'active' : ''}
-              onClick={() => switchPortal('cpanel')}
-            >
-              1. Partie C-Panel (Admin)
-            </button>
-            <button
-              type="button"
-              className={portalChoice === 'client' ? 'active' : ''}
-              onClick={() => switchPortal('client')}
-            >
-              2. Partie Client (CRM)
-            </button>
-          </div>
-
-          <h2>
-            {portalChoice === 'cpanel'
-              ? 'Console C-Panel Administrateur'
-              : mode === 'login'
-              ? 'Espace Client CRM'
-              : 'Inscription nouveau client'}
-          </h2>
-          <p className="mute" style={{ marginTop: 4, fontSize: 13 }}>
-            {portalChoice === 'cpanel'
-              ? 'Gérez vos comptes clients, leurs quotas, la facturation et vos routes télécoms.'
-              : 'Envoyez vos campagnes SMS, WhatsApp, RCS et Email dans le respect de votre forfait.'}
-          </p>
-
-          {portalChoice === 'client' && (
-            <div className="segmented">
-              <button
-                type="button"
-                className={mode === 'login' ? 'active' : ''}
-                onClick={() => {
-                  setMode('login');
-                  setErr('');
-                }}
-              >
-                Connexion Client
-              </button>
-              <button
-                type="button"
-                className={mode === 'register' ? 'active' : ''}
-                onClick={() => {
-                  setMode('register');
-                  setErr('');
-                }}
-              >
-                Créer un compte
-              </button>
+        <form onSubmit={submit}>
+          {mode === 'register' && (
+            <div className="field">
+              <label htmlFor="client-company">Nom de l'entreprise</label>
+              <input
+                id="client-company"
+                name="organization"
+                type="text"
+                autoComplete="organization"
+                enterKeyHint="next"
+                placeholder="Nom de votre entreprise"
+                value={company}
+                onChange={e => setCompany(e.target.value)}
+                required
+              />
             </div>
           )}
 
-          <form
-            style={{ marginTop: portalChoice === 'cpanel' ? 18 : 0 }}
-            onSubmit={e => {
-              e.preventDefault();
-              submit();
-            }}
-          >
-            {mode === 'register' && portalChoice === 'client' && (
-              <div className="field">
-                <label>Nom de l'entreprise</label>
-                <input
-                  placeholder="Ex. Kivu Digital SARL"
-                  value={f.company}
-                  onChange={set('company')}
-                  required
-                />
-              </div>
-            )}
-            <div className="field">
-              <label>Adresse email</label>
-              <input
-                placeholder="nom@entreprise.cd"
-                type="email"
-                value={f.email}
-                onChange={set('email')}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Mot de passe</label>
-              <input
-                placeholder="8 caractères minimum"
-                type="password"
-                value={f.password}
-                onChange={set('password')}
-                required
-              />
-            </div>
-
-            {err && (
-              <div className="notice err" style={{ marginBottom: 14 }}>
-                {err}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="primary"
-              style={{ width: '100%', padding: '9px 14px' }}
-              disabled={loading}
-            >
-              {loading
-                ? 'Authentification…'
-                : portalChoice === 'cpanel'
-                ? 'Ouvrir la Console C-Panel'
-                : mode === 'login'
-                ? 'Ouvrir l’Espace Client'
-                : 'Créer mon Espace Client'}
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
- * PARTIE 1 : COMPOSANTS DE LA CONSOLE C-PANEL (ADMINISTRATION SAAS)
- * ========================================================================== */
-
-function CPanelDashboard({ onNavigate }) {
-  const [s, setS] = useState(null);
-  const [clientsData, setClientsData] = useState({ clients: [] });
-
-  useEffect(() => {
-    api('/stats?allTenants=1').then(setS).catch(console.error);
-    api('/admin/clients').then(setClientsData).catch(console.error);
-  }, []);
-
-  if (!s) return <div className="card mute">Chargement de la supervision C-Panel…</div>;
-
-  const totals = s.totals || {
-    total_tx: 0,
-    success_tx: 0,
-    delivered_tx: 0,
-    failed_tx: 0,
-    out_tx: 0,
-    in_tx: 0,
-    total_cost: 0,
-    total_buy_cost: 0,
-    avg_latency_ms: 38
-  };
-  const successRate =
-    totals.total_tx > 0 ? Math.round((totals.success_tx / totals.total_tx) * 100) : 100;
-  const activeClients = clientsData.clients.filter(c => c.status !== 'suspended').length;
-  const netMarginUsd = Number(totals.total_cost || 0) - Number(totals.total_buy_cost || 0);
-
-  return (
-    <>
-      <div className="page-header">
-        <div>
-          <h2>Supervision Globale — C-Panel SaaS</h2>
-          <p>
-            Vue consolidée de tous vos comptes clients, de la marge télécom et des accusés de réception opérateurs (DLR).
-          </p>
-        </div>
-        <div className="row">
-          <button onClick={() => onNavigate('cpanel-routes')}>Passerelles & DLR</button>
-          <button onClick={() => onNavigate('cpanel-billing')}>Recharger un client</button>
-          <button className="primary" onClick={() => onNavigate('cpanel-clients')}>
-            Gérer les comptes clients
-          </button>
-        </div>
-      </div>
-
-      <div className="metrics-grid">
-        <div className="metric-card">
-          <div className="metric-label">
-            <span>Comptes clients SaaS</span>
-          </div>
-          <div className="metric-value">{clientsData.clients.length}</div>
-          <div className="metric-foot">
-            <span>Actifs : {activeClients}</span>
-            <span>Contacts totaux : {s.contacts}</span>
-          </div>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-label">
-            <span>Transactions & DLR</span>
-          </div>
-          <div className="metric-value">{totals.total_tx}</div>
-          <div className="metric-foot">
-            <span>Livrés (DLR) : {totals.delivered_tx || 0}</span>
-            <span>Entrants (MO) : {totals.in_tx}</span>
-          </div>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-label">
-            <span>Délivrabilité & Latence</span>
-          </div>
-          <div className="metric-value">{successRate}%</div>
-          <div className="metric-foot">
-            <span>Latence moy. : {totals.avg_latency_ms || 38} ms</span>
-            <span className={totals.failed_tx > 0 ? 'err-text' : ''}>
-              Échecs : {totals.failed_tx}
-            </span>
-          </div>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-label">
-            <span>Revenu Facturé & Marge SaaS</span>
-          </div>
-          <div className="metric-value">${Number(totals.total_cost || 0).toFixed(3)}</div>
-          <div className="metric-foot">
-            <span>Achat opérateur : ${Number(totals.total_buy_cost || 0).toFixed(3)}</span>
-            <span style={{ color: 'var(--green)', fontWeight: 600 }}>
-              Marge : +${netMarginUsd.toFixed(3)}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Consommation par entreprise cliente</h3>
-            <p>Aperçu rapide des quotas utilisés par chaque client créé dans le C-Panel.</p>
-          </div>
-          <button className="sm" onClick={() => onNavigate('cpanel-clients')}>
-            Ouvrir la gestion des clients
-          </button>
-        </div>
-
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Forfait</th>
-                <th>Sender ID</th>
-                <th>Contacts</th>
-                <th>Transactions</th>
-                <th>Budget consommé</th>
-                <th>Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              {clientsData.clients.map(c => (
-                <tr key={c.id}>
-                  <td>
-                    <div className="cell-main">{c.name}</div>
-                    <div className="cell-sub mono">{c.email}</div>
-                  </td>
-                  <td style={{ textTransform: 'capitalize' }}>{c.plan}</td>
-                  <td className="mono">{c.sender_id}</td>
-                  <td className="mono">
-                    {c.used_contacts} / {c.limits?.maxContacts || 500}
-                  </td>
-                  <td className="mono">{c.total_tx}</td>
-                  <td className="mono">
-                    ${Number(c.used_spend || 0).toFixed(2)} / ${c.limits?.maxSpendUsd || 25}
-                  </td>
-                  <td>
-                    <span className={`status-pill ${c.status === 'suspended' ? 'suspended' : 'active'}`}>
-                      <span className="status-dot" />
-                      {c.status === 'suspended' ? 'Suspendu' : 'Actif'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Trafic, DLR et Marges par opérateur télécom (Routes partagées)</h3>
-            <p>Répartition des envois, accusés de livraison (DLR), coûts d'achat opérateurs et marges nettes SaaS.</p>
-          </div>
-          <button className="sm" onClick={() => onNavigate('cpanel-routes')}>
-            Configurer les passerelles
-          </button>
-        </div>
-
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Opérateur / Route</th>
-                <th>Canal</th>
-                <th>Sortants</th>
-                <th>Livrés (DLR)</th>
-                <th>Entrants (MO)</th>
-                <th>Latence</th>
-                <th>Coût Achat (USD)</th>
-                <th>Facturé Client (USD)</th>
-                <th>Marge Nette SaaS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(s.byOperator || []).map((row, idx) => {
-                const margin = Number(row.cost || 0) - Number(row.buy_cost || 0);
-                return (
-                  <tr key={idx}>
-                    <td className="cell-main">{row.operator}</td>
-                    <td>
-                      <ChannelBadge c={row.channel} />
-                    </td>
-                    <td className="mono">{row.sent}</td>
-                    <td className="mono">{row.delivered || 0}</td>
-                    <td className="mono">{row.received}</td>
-                    <td className="mono mute">{row.avg_latency_ms || 38} ms</td>
-                    <td className="mono mute">${Number(row.buy_cost || 0).toFixed(4)}</td>
-                    <td className="mono">${Number(row.cost || 0).toFixed(4)}</td>
-                    <td className="mono" style={{ color: 'var(--green)', fontWeight: 600 }}>
-                      +${margin.toFixed(4)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function AdminClientsPanel({ onOpenClientWorkspace }) {
-  const [data, setData] = useState({ clients: [], presets: {} });
-  const [showCreate, setShowCreate] = useState(false);
-  const [editClient, setEditClient] = useState(null);
-  const [msg, setMsg] = useState('');
-  const [err, setErr] = useState('');
-
-  const [form, setForm] = useState({
-    company: '',
-    email: '',
-    password: '',
-    senderId: '',
-    plan: 'starter',
-    maxContacts: 500,
-    maxSms: 1000,
-    maxWhatsapp: 1000,
-    maxRcs: 500,
-    maxEmails: 5000,
-    maxSpendUsd: 25,
-    allowedChannels: ['sms', 'whatsapp', 'email']
-  });
-
-  const load = useCallback(() => {
-    api('/admin/clients').then(setData).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const applyPreset = planKey => {
-    const p = data.presets?.[planKey] || {
-      maxContacts: 500,
-      maxSms: 1000,
-      maxWhatsapp: 1000,
-      maxRcs: 500,
-      maxEmails: 5000,
-      maxSpendUsd: 25,
-      allowedChannels: ['sms', 'whatsapp', 'email']
-    };
-    setForm(prev => ({
-      ...prev,
-      plan: planKey,
-      maxContacts: p.maxContacts,
-      maxSms: p.maxSms,
-      maxWhatsapp: p.maxWhatsapp,
-      maxRcs: p.maxRcs,
-      maxEmails: p.maxEmails,
-      maxSpendUsd: p.maxSpendUsd,
-      allowedChannels: p.allowedChannels || ['sms', 'whatsapp', 'rcs', 'email']
-    }));
-  };
-
-  const toggleAllowedChannel = ch => {
-    const cur = form.allowedChannels || [];
-    setForm({
-      ...form,
-      allowedChannels: cur.includes(ch) ? cur.filter(x => x !== ch) : [...cur, ch]
-    });
-  };
-
-  const handleCreate = async e => {
-    e.preventDefault();
-    setErr('');
-    setMsg('');
-    try {
-      await api('/admin/clients', {
-        method: 'POST',
-        body: {
-          company: form.company,
-          email: form.email,
-          password: form.password,
-          senderId: form.senderId,
-          plan: form.plan,
-          limits: {
-            maxContacts: +form.maxContacts,
-            maxSms: +form.maxSms,
-            maxWhatsapp: +form.maxWhatsapp,
-            maxRcs: +form.maxRcs,
-            maxEmails: +form.maxEmails,
-            maxSpendUsd: +form.maxSpendUsd,
-            allowedChannels: form.allowedChannels
-          }
-        }
-      });
-      setMsg(`Compte client "${form.company}" (${form.email}) créé avec succès.`);
-      setShowCreate(false);
-      setForm({
-        company: '',
-        email: '',
-        password: '',
-        senderId: '',
-        plan: 'starter',
-        maxContacts: 500,
-        maxSms: 1000,
-        maxWhatsapp: 1000,
-        maxRcs: 500,
-        maxEmails: 5000,
-        maxSpendUsd: 25,
-        allowedChannels: ['sms', 'whatsapp', 'email']
-      });
-      load();
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const openEditModal = c => {
-    setEditClient({
-      id: c.id,
-      name: c.name,
-      email: c.email,
-      plan: c.plan || 'starter',
-      status: c.status || 'active',
-      senderId: c.sender_id || 'RAYONS',
-      newPassword: '',
-      maxContacts: c.limits?.maxContacts ?? 500,
-      maxSms: c.limits?.maxSms ?? 1000,
-      maxWhatsapp: c.limits?.maxWhatsapp ?? 1000,
-      maxRcs: c.limits?.maxRcs ?? 500,
-      maxEmails: c.limits?.maxEmails ?? 5000,
-      maxSpendUsd: c.limits?.maxSpendUsd ?? 25,
-      allowedChannels: c.limits?.allowedChannels || ['sms', 'whatsapp', 'rcs', 'email']
-    });
-  };
-
-  const handleSaveEdit = async e => {
-    e.preventDefault();
-    if (!editClient) return;
-    setErr('');
-    setMsg('');
-    try {
-      await api(`/admin/clients/${editClient.id}`, {
-        method: 'PUT',
-        body: {
-          name: editClient.name,
-          email: editClient.email,
-          plan: editClient.plan,
-          status: editClient.status,
-          senderId: editClient.senderId,
-          newPassword: editClient.newPassword || undefined,
-          limits: {
-            maxContacts: +editClient.maxContacts,
-            maxSms: +editClient.maxSms,
-            maxWhatsapp: +editClient.maxWhatsapp,
-            maxRcs: +editClient.maxRcs,
-            maxEmails: +editClient.maxEmails,
-            maxSpendUsd: +editClient.maxSpendUsd,
-            allowedChannels: editClient.allowedChannels
-          }
-        }
-      });
-      setMsg(`Limites du client "${editClient.name}" mises à jour.`);
-      setEditClient(null);
-      load();
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const toggleStatus = async c => {
-    const next = c.status === 'suspended' ? 'active' : 'suspended';
-    await api(`/admin/clients/${c.id}`, {
-      method: 'PUT',
-      body: { status: next }
-    });
-    load();
-  };
-
-  return (
-    <>
-      <div className="page-header">
-        <div>
-          <h2>Comptes Clients et Limites d'utilisation</h2>
-          <p>
-            Créez des comptes clients, définissez leurs plafonds mensuels et accédez en un clic à leur Espace Client.
-          </p>
-        </div>
-        <div className="row">
-          <button onClick={load}>Actualiser</button>
-          <button className="primary" onClick={() => setShowCreate(!showCreate)}>
-            {showCreate ? 'Fermer le formulaire' : 'Nouveau compte client'}
-          </button>
-        </div>
-      </div>
-
-      {msg && (
-        <div className="notice ok" style={{ marginBottom: 16 }}>
-          {msg}
-        </div>
-      )}
-      {err && (
-        <div className="notice err" style={{ marginBottom: 16 }}>
-          {err}
-        </div>
-      )}
-
-      {showCreate && (
-        <form className="card" onSubmit={handleCreate}>
-          <div className="card-header">
-            <div>
-              <h3>Créer un compte client SaaS</h3>
-              <p>
-                Le client disposera de son propre Espace Client isolé et utilisera vos routes télécoms partagées.
-              </p>
-            </div>
-            <div className="row">
-              {['starter', 'business', 'enterprise'].map(p => (
-                <button
-                  key={p}
-                  type="button"
-                  className={`sm ${form.plan === p ? 'primary' : ''}`}
-                  onClick={() => applyPreset(p)}
-                >
-                  Forfait {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid-auto" style={{ marginBottom: 14 }}>
-            <div className="field">
-              <label>Entreprise cliente</label>
-              <input
-                placeholder="Ex. Kivu Market SARL"
-                value={form.company}
-                onChange={e => setForm({ ...form, company: e.target.value })}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Email du client (Identifiant et expéditeur)</label>
-              <input
-                type="email"
-                placeholder="contact@client.cd"
-                value={form.email}
-                onChange={e => setForm({ ...form, email: e.target.value })}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Mot de passe initial</label>
-              <input
-                type="text"
-                placeholder="8 caractères minimum"
-                value={form.password}
-                onChange={e => setForm({ ...form, password: e.target.value })}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Sender ID Télécom (11 caract. max)</label>
-              <input
-                placeholder="Ex. KIVUMARKET"
-                value={form.senderId}
-                onChange={e => setForm({ ...form, senderId: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div className="grid-3" style={{ marginBottom: 14 }}>
-            <div className="field">
-              <label>Contacts maximum</label>
-              <input
-                type="number"
-                value={form.maxContacts}
-                onChange={e => setForm({ ...form, maxContacts: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label>Quota SMS Télécom / mois</label>
-              <input
-                type="number"
-                value={form.maxSms}
-                onChange={e => setForm({ ...form, maxSms: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label>Quota WhatsApp / mois</label>
-              <input
-                type="number"
-                value={form.maxWhatsapp}
-                onChange={e => setForm({ ...form, maxWhatsapp: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label>Quota RCS Opérateur / mois</label>
-              <input
-                type="number"
-                value={form.maxRcs}
-                onChange={e => setForm({ ...form, maxRcs: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label>Quota Emails directs / mois</label>
-              <input
-                type="number"
-                value={form.maxEmails}
-                onChange={e => setForm({ ...form, maxEmails: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label>Plafond Budget Télécom (USD)</label>
-              <input
-                type="number"
-                step="0.5"
-                value={form.maxSpendUsd}
-                onChange={e => setForm({ ...form, maxSpendUsd: e.target.value })}
-              />
-            </div>
+          <div className="field">
+            <label htmlFor="client-email">Adresse email</label>
+            <input
+              id="client-email"
+              name="email"
+              type="email"
+              autoComplete="username"
+              spellCheck={false}
+              enterKeyHint="next"
+              placeholder="nom@entreprise.cd"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
           </div>
 
           <div className="field">
-            <label>Canaux activés pour ce client</label>
-            <div className="row" style={{ gap: 16, marginTop: 4 }}>
-              {Object.entries(CH).map(([k, label]) => (
-                <label
-                  key={k}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
-                >
-                  <input
-                    type="checkbox"
-                    style={{ width: 'auto' }}
-                    checked={form.allowedChannels.includes(k)}
-                    onChange={() => toggleAllowedChannel(k)}
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="row" style={{ marginTop: 16 }}>
-            <button type="submit" className="primary">
-              Créer le compte client
-            </button>
-            <button type="button" onClick={() => setShowCreate(false)}>
-              Annuler
-            </button>
-          </div>
-        </form>
-      )}
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Entreprises clientes ({data.clients.length})</h3>
-            <p>Cliquez sur « Ouvrir Espace Client » pour accéder directement au portail CRM d'un client.</p>
-          </div>
-        </div>
-
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Entreprise et compte</th>
-                <th>Forfait</th>
-                <th>Sender ID</th>
-                <th>Contacts</th>
-                <th>Quotas mensuels (Utilisés / Max)</th>
-                <th>Budget USD</th>
-                <th>Statut</th>
-                <th style={{ textAlign: 'right' }}>Actions C-Panel</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.clients.map(c => {
-                const lim = c.limits || {};
-                return (
-                  <tr key={c.id}>
-                    <td>
-                      <div className="cell-main">
-                        {c.name}{' '}
-                        {c.role === 'superadmin' && (
-                          <span className="badge neutral">Master</span>
-                        )}
-                      </div>
-                      <div className="cell-sub mono">{c.email}</div>
-                    </td>
-                    <td>
-                      <span className="badge neutral" style={{ textTransform: 'capitalize' }}>
-                        {c.plan}
-                      </span>
-                    </td>
-                    <td className="mono">{c.sender_id}</td>
-                    <td className="mono">
-                      {c.used_contacts} / {lim.maxContacts || 500}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      <div>
-                        SMS : <span className="mono">{c.used_sms}/{lim.maxSms}</span> • WhatsApp :{' '}
-                        <span className="mono">{c.used_whatsapp}/{lim.maxWhatsapp}</span>
-                      </div>
-                      <div className="mute">
-                        RCS : <span className="mono">{c.used_rcs}/{lim.maxRcs}</span> • Email :{' '}
-                        <span className="mono">{c.used_email}/{lim.maxEmails}</span>
-                      </div>
-                    </td>
-                    <td className="mono">
-                      ${Number(c.used_spend || 0).toFixed(2)} / ${lim.maxSpendUsd || 25}
-                    </td>
-                    <td>
-                      <span className={`status-pill ${c.status === 'suspended' ? 'suspended' : 'active'}`}>
-                        <span className="status-dot" />
-                        {c.status === 'suspended' ? 'Suspendu' : 'Actif'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button
-                        className="sm primary"
-                        onClick={() => onOpenClientWorkspace(c.id)}
-                      >
-                        Ouvrir Espace Client
-                      </button>{' '}
-                      <button className="sm" onClick={() => openEditModal(c)}>
-                        Limites
-                      </button>{' '}
-                      {c.role !== 'superadmin' && (
-                        <>
-                          <button className="sm" onClick={() => toggleStatus(c)}>
-                            {c.status === 'suspended' ? 'Activer' : 'Suspendre'}
-                          </button>{' '}
-                          <button
-                            className="sm danger"
-                            onClick={async () => {
-                              await api(`/admin/clients/${c.id}`, { method: 'DELETE' });
-                              load();
-                            }}
-                          >
-                            Supprimer
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {editClient && (
-        <div className="modal-overlay" onClick={() => setEditClient(null)}>
-          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Modifier les limites — {editClient.name}</h3>
-              <button className="sm ghost" onClick={() => setEditClient(null)}>
-                <Icon name="close" />
+            <label htmlFor="client-password">Mot de passe</label>
+            <div className="pwd-field">
+              <input
+                id="client-password"
+                name="password"
+                type={showPwd ? 'text' : 'password'}
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                minLength={8}
+                enterKeyHint="done"
+                placeholder="8 caractères minimum"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="pwd-toggle"
+                aria-pressed={showPwd}
+                onClick={() => setShowPwd(v => !v)}
+              >
+                {showPwd ? 'Masquer' : 'Afficher'}
               </button>
             </div>
-            <form className="modal-content" onSubmit={handleSaveEdit}>
-              <div className="grid-2">
-                <div className="field">
-                  <label>Entreprise</label>
-                  <input
-                    value={editClient.name}
-                    onChange={e => setEditClient({ ...editClient, name: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Sender ID Télécom</label>
-                  <input
-                    value={editClient.senderId}
-                    onChange={e => setEditClient({ ...editClient, senderId: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Forfait</label>
-                  <select
-                    value={editClient.plan}
-                    onChange={e => {
-                      const pKey = e.target.value;
-                      const p = data.presets?.[pKey] || {};
-                      setEditClient({
-                        ...editClient,
-                        plan: pKey,
-                        maxContacts: p.maxContacts ?? editClient.maxContacts,
-                        maxSms: p.maxSms ?? editClient.maxSms,
-                        maxWhatsapp: p.maxWhatsapp ?? editClient.maxWhatsapp,
-                        maxRcs: p.maxRcs ?? editClient.maxRcs,
-                        maxEmails: p.maxEmails ?? editClient.maxEmails,
-                        maxSpendUsd: p.maxSpendUsd ?? editClient.maxSpendUsd
-                      });
-                    }}
-                  >
-                    <option value="starter">Starter</option>
-                    <option value="business">Business</option>
-                    <option value="enterprise">Enterprise</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Nouveau mot de passe (optionnel)</label>
-                  <input
-                    type="password"
-                    placeholder="Laisser vide pour conserver"
-                    value={editClient.newPassword}
-                    onChange={e => setEditClient({ ...editClient, newPassword: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="grid-2">
-                <div className="field">
-                  <label>Contacts maximum</label>
-                  <input
-                    type="number"
-                    value={editClient.maxContacts}
-                    onChange={e => setEditClient({ ...editClient, maxContacts: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Quota SMS / mois</label>
-                  <input
-                    type="number"
-                    value={editClient.maxSms}
-                    onChange={e => setEditClient({ ...editClient, maxSms: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Quota WhatsApp / mois</label>
-                  <input
-                    type="number"
-                    value={editClient.maxWhatsapp}
-                    onChange={e => setEditClient({ ...editClient, maxWhatsapp: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Quota RCS / mois</label>
-                  <input
-                    type="number"
-                    value={editClient.maxRcs}
-                    onChange={e => setEditClient({ ...editClient, maxRcs: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Quota Emails / mois</label>
-                  <input
-                    type="number"
-                    value={editClient.maxEmails}
-                    onChange={e => setEditClient({ ...editClient, maxEmails: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>Plafond Budget (USD)</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={editClient.maxSpendUsd}
-                    onChange={e => setEditClient({ ...editClient, maxSpendUsd: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
-                <button type="button" onClick={() => setEditClient(null)}>
-                  Annuler
-                </button>
-                <button type="submit" className="primary">
-                  Enregistrer
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
-    </>
-  );
-}
 
-function CPanelBilling() {
-  const [data, setData] = useState({ clients: [], creditLogs: [], rechargeRequests: [] });
-  const [f, setF] = useState({
-    tenantId: '',
-    amountUsd: '25',
-    paymentMethod: 'M-Pesa Vodacom',
-    reference: '',
-    note: ''
-  });
-  const [msg, setMsg] = useState('');
-  const [err, setErr] = useState('');
-
-  const load = useCallback(() => {
-    api('/admin/clients')
-      .then(res => {
-        setData(res);
-        if (!f.tenantId && res.clients?.length > 0) {
-          const firstClient = res.clients.find(c => c.role !== 'superadmin') || res.clients[0];
-          setF(prev => ({ ...prev, tenantId: String(firstClient.id) }));
-        }
-      })
-      .catch(console.error);
-  }, [f.tenantId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const handleRecharge = async e => {
-    e.preventDefault();
-    setMsg('');
-    setErr('');
-    try {
-      const out = await api(`/admin/clients/${f.tenantId}/recharge`, {
-        method: 'POST',
-        body: {
-          amountUsd: +f.amountUsd,
-          paymentMethod: f.paymentMethod,
-          reference: f.reference,
-          note: f.note
-        }
-      });
-      setMsg(`Crédit rechargé (+${f.amountUsd} USD). Nouveau plafond : $${out.newMaxSpendUsd} USD.`);
-      setF(prev => ({ ...prev, reference: '', note: '' }));
-      load();
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const reviewRequest = async (id, decision) => {
-    setMsg('');
-    setErr('');
-    try {
-      const out = await api(`/admin/recharge-requests/${id}/review`, {
-        method: 'POST',
-        body: { decision }
-      });
-      setMsg(
-        decision === 'approved'
-          ? `Demande approuvée : compte client crédité (nouveau plafond : $${out.newMaxSpendUsd} USD).`
-          : 'Demande de rechargement rejetée.'
-      );
-      load();
-    } catch (e) {
-      setErr(e.message);
-    }
-  };
-
-  const pendingReqs = (data.rechargeRequests || []).filter(r => r.status === 'pending');
-
-  return (
-    <>
-      <div className="page-header">
-        <div>
-          <h2>Facturation, Validation Mobile Money et Crédits Clients</h2>
-          <p>
-            Validez en un clic les demandes de rechargement soumises par vos clients depuis leur Espace Client ou créditez-les manuellement.
-          </p>
-        </div>
-        <button onClick={load}>Actualiser</button>
-      </div>
-
-      {msg && (
-        <div className="notice ok" style={{ marginBottom: 16 }}>
-          {msg}
-        </div>
-      )}
-      {err && (
-        <div className="notice err" style={{ marginBottom: 16 }}>
-          {err}
-        </div>
-      )}
-
-      {/* DEMANDES DE RECHARGEMENT SOUMISES PAR LES CLIENTS */}
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>
-              Demandes de rechargement Mobile Money / Banque des clients ({pendingReqs.length} en attente)
-            </h3>
-            <p>
-              Lorsqu'un client soumet une preuve de paiement M-Pesa, Airtel Money, Orange Money ou virement dans son Espace Client, validez-la ici.
-            </p>
-          </div>
-        </div>
-
-        {(data.rechargeRequests || []).length === 0 ? (
-          <p className="mute">Aucune demande de rechargement soumise pour le moment.</p>
-        ) : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Client SaaS</th>
-                  <th>Montant demandé</th>
-                  <th>Moyen & Numéro payeur</th>
-                  <th>Référence paiement</th>
-                  <th>Statut</th>
-                  <th style={{ textAlign: 'right' }}>Validation C-Panel</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data.rechargeRequests || []).map(r => (
-                  <tr key={r.id}>
-                    <td className="mute" style={{ whiteSpace: 'nowrap' }}>
-                      {new Date(r.created_at).toLocaleString('fr-FR', {
-                        dateStyle: 'short',
-                        timeStyle: 'short'
-                      })}
-                    </td>
-                    <td>
-                      <div className="cell-main">{r.tenant_name || `Client #${r.tenant_id}`}</div>
-                      <div className="cell-sub">{r.note || ''}</div>
-                    </td>
-                    <td className="mono" style={{ fontWeight: 600 }}>
-                      +${Number(r.amount_usd).toFixed(2)} USD
-                    </td>
-                    <td>
-                      <span className="badge neutral">{r.payment_method}</span>
-                      {r.payer_phone && <div className="cell-sub mono">{r.payer_phone}</div>}
-                    </td>
-                    <td className="mono">{r.reference}</td>
-                    <td>
-                      <span
-                        className={`status-pill ${
-                          r.status === 'approved'
-                            ? 'delivered'
-                            : r.status === 'rejected'
-                            ? 'failed'
-                            : 'queued'
-                        }`}
-                      >
-                        <span className="status-dot" />
-                        {r.status === 'approved'
-                          ? 'Approuvée'
-                          : r.status === 'rejected'
-                          ? 'Rejetée'
-                          : 'En attente'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {r.status === 'pending' ? (
-                        <>
-                          <button
-                            className="sm primary"
-                            onClick={() => reviewRequest(r.id, 'approved')}
-                          >
-                            Approuver & Créditer
-                          </button>{' '}
-                          <button
-                            className="sm danger"
-                            onClick={() => reviewRequest(r.id, 'rejected')}
-                          >
-                            Rejeter
-                          </button>
-                        </>
-                      ) : (
-                        <span className="mute" style={{ fontSize: 12 }}>
-                          Traitée
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="split-view">
-        <div className="card" style={{ marginBottom: 0 }}>
-          <div className="card-header">
-            <div>
-              <h3>Historique des paiements et rechargements validés</h3>
-              <p>Opérations de crédit enregistrées dans le C-Panel.</p>
+          {err && (
+            <div role="alert" className="err-text" style={{ fontSize: 13, marginBottom: 12 }}>
+              {err}
             </div>
-          </div>
+          )}
 
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Client</th>
-                  <th>Montant</th>
-                  <th>Mode de paiement</th>
-                  <th>Référence</th>
-                  <th>Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data.creditLogs || []).map(log => (
-                  <tr key={log.id}>
-                    <td className="mute" style={{ whiteSpace: 'nowrap' }}>
-                      {new Date(log.created_at).toLocaleString('fr-FR', {
-                        dateStyle: 'short',
-                        timeStyle: 'short'
-                      })}
-                    </td>
-                    <td className="cell-main">{log.tenant_name || `Tenant #${log.tenant_id}`}</td>
-                    <td className="mono">+${Number(log.amount_usd).toFixed(2)}</td>
-                    <td>
-                      <span className="badge neutral">{log.payment_method}</span>
-                    </td>
-                    <td className="mono">{log.reference || '—'}</td>
-                    <td className="mute">{log.note || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <form className="card sticky-panel" style={{ marginBottom: 0 }} onSubmit={handleRecharge}>
-          <div className="card-header">
-            <div>
-              <h3>Créditer directement un client</h3>
-              <p>Augmente immédiatement le plafond de budget télécom du client.</p>
-            </div>
-          </div>
-
-          <div className="field">
-            <label>Entreprise cliente</label>
-            <select
-              value={f.tenantId}
-              onChange={e => setF({ ...f, tenantId: e.target.value })}
-              required
-            >
-              {data.clients.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.email}) — Plafond actuel : ${c.limits?.maxSpendUsd || 25}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Montant à créditer (USD)</label>
-            <input
-              type="number"
-              step="1"
-              min="1"
-              value={f.amountUsd}
-              onChange={e => setF({ ...f, amountUsd: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label>Canal de paiement reçu</label>
-            <select
-              value={f.paymentMethod}
-              onChange={e => setF({ ...f, paymentMethod: e.target.value })}
-            >
-              <option value="M-Pesa Vodacom">M-Pesa Vodacom</option>
-              <option value="Airtel Money">Airtel Money</option>
-              <option value="Orange Money">Orange Money</option>
-              <option value="Afrimoney">Afrimoney</option>
-              <option value="Virement Bancaire">Virement Bancaire</option>
-              <option value="Espèces">Espèces</option>
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Référence de transaction (Mobile Money / Banque)</label>
-            <input
-              placeholder="Ex. MPESA-948271"
-              value={f.reference}
-              onChange={e => setF({ ...f, reference: e.target.value })}
-            />
-          </div>
-
-          <div className="field">
-            <label>Note interne</label>
-            <input
-              placeholder="Ex. Rechargement mensuel"
-              value={f.note}
-              onChange={e => setF({ ...f, note: e.target.value })}
-            />
-          </div>
-
-          <button type="submit" className="primary" style={{ width: '100%' }}>
-            Valider le rechargement (+${f.amountUsd} USD)
+          <button type="submit" className="primary" style={{ width: '100%' }} disabled={loading}>
+            {loading
+              ? 'Authentification…'
+              : mode === 'login'
+              ? 'Se connecter'
+              : 'Créer mon compte'}
           </button>
         </form>
       </div>
-    </>
-  );
-}
-
-function CPanelRoutes() {
-  const [d, setD] = useState(null);
-  const [ok, setOk] = useState(false);
-  const [whLogs, setWhLogs] = useState([]);
-  const [testResults, setTestResults] = useState({});
-  const [testingOp, setTestingOp] = useState(null);
-
-  const [dlrSim, setDlrSim] = useState({ txRef: '', status: 'DELIVRD', errCode: '000' });
-  const [moSim, setMoSim] = useState({
-    from: '+243 81 450 0111',
-    toSenderId: 'KIVUTECH',
-    text: 'Bonjour, je confirme la réception de votre offre. Merci !',
-    channel: 'sms'
-  });
-  const [simNotice, setSimNotice] = useState('');
-
-  const loadWebhooks = useCallback(() => {
-    api('/admin/webhooks').then(setWhLogs).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    api('/settings').then(x => setD({ ...x, settings: x.settings || {} }));
-    loadWebhooks();
-  }, [loadWebhooks]);
-
-  if (!d) return <div className="card mute">Chargement des routes télécoms maîtresses…</div>;
-
-  const setTelecom = (op, k) => e => {
-    const telecom = d.settings.telecom || {};
-    setD({
-      ...d,
-      settings: {
-        ...d.settings,
-        telecom: {
-          ...telecom,
-          [op]: { ...(telecom[op] || {}), [k]: e.target.value }
-        }
-      }
-    });
-  };
-  const vTelecom = (op, k, fallback = '') => d.settings.telecom?.[op]?.[k] ?? fallback;
-
-  const setGroup = (g, k) => e =>
-    setD({
-      ...d,
-      settings: { ...d.settings, [g]: { ...(d.settings[g] || {}), [k]: e.target.value } }
-    });
-  const vGroup = (g, k, fallback = '') => d.settings[g]?.[k] ?? fallback;
-
-  const save = async () => {
-    await api('/settings', { method: 'PUT', body: { settings: d.settings } });
-    const refreshed = await api('/settings');
-    setD({ ...refreshed, settings: refreshed.settings || {} });
-    setOk(true);
-    setTimeout(() => setOk(false), 2500);
-  };
-
-  const runRouteTest = async opKey => {
-    setTestingOp(opKey);
-    try {
-      const out = await api('/admin/routes/test', {
-        method: 'POST',
-        body: { operator: opKey, settingsOverride: d.settings }
-      });
-      setTestResults(prev => ({ ...prev, [opKey]: { ok: true, ...out } }));
-      loadWebhooks();
-    } catch (e) {
-      setTestResults(prev => ({ ...prev, [opKey]: { ok: false, error: e.message } }));
-      loadWebhooks();
-    } finally {
-      setTestingOp(null);
-    }
-  };
-
-  const triggerSimulateDlr = async e => {
-    e.preventDefault();
-    setSimNotice('');
-    try {
-      const out = await api('/admin/webhooks/simulate-dlr', {
-        method: 'POST',
-        body: dlrSim
-      });
-      setSimNotice(
-        `Webhook DLR reçu : Transaction ${out.txRef || 'récente'} mise à jour vers "${out.status}" (Code : ${out.dlrCode}).`
-      );
-      loadWebhooks();
-    } catch (err) {
-      setSimNotice(`Erreur DLR : ${err.message}`);
-    }
-  };
-
-  const triggerSimulateMo = async e => {
-    e.preventDefault();
-    setSimNotice('');
-    try {
-      const out = await api('/admin/webhooks/simulate-mo', {
-        method: 'POST',
-        body: moSim
-      });
-      setSimNotice(
-        `SMS Entrant (MO) routé vers le client "${out.tenant}" (Réf : ${out.message?.tx_ref}).`
-      );
-      loadWebhooks();
-    } catch (err) {
-      setSimNotice(`Erreur MO : ${err.message}`);
-    }
-  };
-
-  const telecomOps = [
-    {
-      key: 'vodacom',
-      name: 'Vodacom RDC (Préfixes 081, 082, 083)',
-      defaultUrl: 'https://sdp.vodacom.cd/api/v1/sms/send',
-      defaultSmpp: 'smpp.vodacom.cd',
-      defaultBuy: '0.009',
-      defaultSell: '0.015'
-    },
-    {
-      key: 'airtel',
-      name: 'Airtel RDC (Préfixes 097, 098, 099)',
-      defaultUrl: 'https://messaging.airtel.cd/api/v1/messages',
-      defaultSmpp: 'smpp.airtel.cd',
-      defaultBuy: '0.008',
-      defaultSell: '0.014'
-    },
-    {
-      key: 'orange',
-      name: 'Orange RDC (Préfixes 080, 084, 085, 089)',
-      defaultUrl: 'https://api.orange.cd/smsmessaging/v1/outbound',
-      defaultSmpp: 'smpp.orange.cd',
-      defaultBuy: '0.009',
-      defaultSell: '0.015'
-    },
-    {
-      key: 'africell',
-      name: 'Africell RDC (Préfixes 090, 091)',
-      defaultUrl: 'https://gw.africell.cd/api/sms/send',
-      defaultSmpp: 'smpp.africell.cd',
-      defaultBuy: '0.007',
-      defaultSell: '0.012'
-    }
-  ];
-
-  const webhookBase = d.webhookBase || `${API}/webhooks`;
-
-  return (
-    <>
-      <div className="page-header">
-        <div>
-          <h2>Passerelles Télécoms RDC (SMPP v3.4 / HTTP) et Webhooks DLR</h2>
-          <p>
-            Configurez vos interconnexions directes avec Vodacom, Airtel, Orange et Africell RDC, vos coûts d'achat/revente et vos Webhooks d'accusés de livraison (DLR).
-          </p>
-        </div>
-        <div className="row">
-          {ok && <span className="notice ok" style={{ padding: '6px 10px' }}>Configuration enregistrée</span>}
-          <button onClick={loadWebhooks}>Actualiser Webhooks</button>
-          <button className="primary" onClick={save}>
-            Enregistrer les routes maîtresses
-          </button>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Connecteurs Opérateurs Télécoms RDC (SMPP v3.4 Direct & REST SDP)</h3>
-            <p>
-              Sélectionnez le protocole de chaque opérateur (SMPP v3.4 TCP, Orange SDP, HTTP REST ou HTTP GET Kannel) et testez la liaison.
-            </p>
-          </div>
-          <ChannelBadge c="sms" />
-        </div>
-
-        {telecomOps.map(op => {
-          const protocol = vTelecom(op.key, 'protocol', op.key === 'orange' ? 'orange_sdp' : 'http_json');
-          const mode = vTelecom(op.key, 'mode', 'sandbox_dlr');
-          const buyCost = Number(vTelecom(op.key, 'buyCost', op.defaultBuy) || 0);
-          const sellCost = Number(vTelecom(op.key, 'smsCost', op.defaultSell) || 0);
-          const unitMargin = sellCost - buyCost;
-          const diag = testResults[op.key];
-
-          return (
-            <div key={op.key} className="route-block">
-              <div className="card-header" style={{ marginBottom: 12 }}>
-                <div>
-                  <h4 style={{ marginBottom: 2 }}>{op.name}</h4>
-                  <div className="mute" style={{ fontSize: 12 }}>
-                    Marge unitaire :{' '}
-                    <strong className="mono" style={{ color: 'var(--green)' }}>
-                      +${unitMargin.toFixed(4)} / SMS
-                    </strong>{' '}
-                    (Achat : ${buyCost.toFixed(4)} → Client : ${sellCost.toFixed(4)})
-                  </div>
-                </div>
-                <div className="row">
-                  <span className={`status-pill ${mode === 'live' ? 'sent' : 'active'}`}>
-                    <span className="status-dot" />
-                    {mode === 'live' ? 'Production Live' : 'Bac à sable + DLR Auto'}
-                  </span>
-                  <button
-                    type="button"
-                    className="sm"
-                    disabled={testingOp === op.key}
-                    onClick={() => runRouteTest(op.key)}
-                  >
-                    {testingOp === op.key ? 'Test en cours…' : 'Tester la passerelle'}
-                  </button>
-                </div>
-              </div>
-
-              {diag && (
-                <div
-                  className={`notice ${diag.ok ? 'ok' : 'err'}`}
-                  style={{ marginBottom: 12 }}
-                >
-                  {diag.ok ? diag.message : diag.error}
-                </div>
-              )}
-
-              <div className="grid-4" style={{ marginBottom: 12 }}>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>Protocole Opérateur</label>
-                  <select value={protocol} onChange={setTelecom(op.key, 'protocol')}>
-                    <option value="http_json">HTTP REST JSON (SDP)</option>
-                    <option value="orange_sdp">Orange RDC SDP API</option>
-                    <option value="smpp_v34">SMPP v3.4 Direct (TCP)</option>
-                    <option value="http_get">HTTP GET (Kannel / Jasmin)</option>
-                  </select>
-                </div>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>Mode d'exécution</label>
-                  <select value={mode} onChange={setTelecom(op.key, 'mode')}>
-                    <option value="sandbox_dlr">Simulation Réseau + DLR Auto (1.2s)</option>
-                    <option value="live">Production Live (Connexion Réelle)</option>
-                  </select>
-                </div>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>Coût d'achat opérateur (USD)</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={vTelecom(op.key, 'buyCost', op.defaultBuy)}
-                    onChange={setTelecom(op.key, 'buyCost')}
-                  />
-                </div>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>Tarif facturé au client (USD)</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={vTelecom(op.key, 'smsCost', op.defaultSell)}
-                    onChange={setTelecom(op.key, 'smsCost')}
-                  />
-                </div>
-              </div>
-
-              {protocol === 'smpp_v34' ? (
-                <div className="grid-4" style={{ marginBottom: 10 }}>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>Hôte SMSC (SMPP Host)</label>
-                    <input
-                      className="mono"
-                      value={vTelecom(op.key, 'smppHost', op.defaultSmpp)}
-                      onChange={setTelecom(op.key, 'smppHost')}
-                    />
-                  </div>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>Port TCP SMPP</label>
-                    <input
-                      className="mono"
-                      value={vTelecom(op.key, 'smppPort', '2775')}
-                      onChange={setTelecom(op.key, 'smppPort')}
-                    />
-                  </div>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>System ID (Identifiant SMPP)</label>
-                    <input
-                      className="mono"
-                      value={vTelecom(op.key, 'systemId', `rayons_${op.key}`)}
-                      onChange={setTelecom(op.key, 'systemId')}
-                    />
-                  </div>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>Mot de passe SMPP</label>
-                    <input
-                      type="password"
-                      placeholder="Mot de passe bind_transceiver"
-                      value={vTelecom(op.key, 'smppPassword')}
-                      onChange={setTelecom(op.key, 'smppPassword')}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="grid-4" style={{ marginBottom: 10 }}>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>URL Gateway HTTP Opérateur</label>
-                    <input
-                      className="mono"
-                      value={vTelecom(op.key, 'gatewayUrl', op.defaultUrl)}
-                      onChange={setTelecom(op.key, 'gatewayUrl')}
-                    />
-                  </div>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>Authentification HTTP</label>
-                    <select
-                      value={vTelecom(op.key, 'authType', 'bearer')}
-                      onChange={setTelecom(op.key, 'authType')}
-                    >
-                      <option value="bearer">Bearer Token (OAuth2 / JWT)</option>
-                      <option value="apikey_header">En-tête X-API-Key</option>
-                      <option value="basic">HTTP Basic (User / Pass)</option>
-                    </select>
-                  </div>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>Clé API / Token Opérateur</label>
-                    <input
-                      type="password"
-                      placeholder="Token direct opérateur"
-                      value={vTelecom(op.key, 'apiKey')}
-                      onChange={setTelecom(op.key, 'apiKey')}
-                    />
-                  </div>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>Identifiant / Username (si Basic/GET)</label>
-                    <input
-                      placeholder="Optionnel"
-                      value={vTelecom(op.key, 'username')}
-                      onChange={setTelecom(op.key, 'username')}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="notice mono" style={{ fontSize: 11.5, padding: '8px 12px' }}>
-                Webhook DLR (Accusés de livraison) : <strong>POST {webhookBase}/dlr/{op.key}</strong> • Webhook Entrant (MO) :{' '}
-                <strong>POST {webhookBase}/inbound/{op.key}</strong>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Passerelle WhatsApp Cloud API (Meta)</h3>
-            <p>Configuration partagée pour les envois et réceptions WhatsApp Business.</p>
-          </div>
-          <ChannelBadge c="whatsapp" />
-        </div>
-        <div className="grid-4">
-          <div className="field">
-            <label>Phone Number ID</label>
-            <input
-              placeholder="104928374928374"
-              value={vGroup('whatsapp', 'phoneId')}
-              onChange={setGroup('whatsapp', 'phoneId')}
-            />
-          </div>
-          <div className="field">
-            <label>Access Token Permanent</label>
-            <input
-              type="password"
-              placeholder="EAAGm0PX4ZCpsBA..."
-              value={vGroup('whatsapp', 'token')}
-              onChange={setGroup('whatsapp', 'token')}
-            />
-          </div>
-          <div className="field">
-            <label>Coût d'achat Meta (USD)</label>
-            <input
-              type="number"
-              step="0.001"
-              value={vGroup('whatsapp', 'buyCost', '0.005')}
-              onChange={setGroup('whatsapp', 'buyCost')}
-            />
-          </div>
-          <div className="field">
-            <label>Tarif facturé client (USD)</label>
-            <input
-              type="number"
-              step="0.001"
-              value={vGroup('whatsapp', 'cost', '0.008')}
-              onChange={setGroup('whatsapp', 'cost')}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Passerelle RCS Business Messaging (Google Jibe / Opérateurs RDC + Repli SMS)</h3>
-            <p>
-              Configuration de l'Agent RCS Vérifié (Cartes Riches, images, boutons d'action interactifs et bascule SMS automatique).
-            </p>
-          </div>
-          <ChannelBadge c="rcs" />
-        </div>
-        <div className="grid-4">
-          <div className="field">
-            <label>ID Agent RCS Vérifié</label>
-            <input
-              className="mono"
-              placeholder="RAYONS_RCS_CD"
-              value={vGroup('rcs', 'agentId', 'RAYONS_RCS_CD')}
-              onChange={setGroup('rcs', 'agentId')}
-            />
-          </div>
-          <div className="field">
-            <label>Endpoint RBM / Jibe Gateway</label>
-            <input
-              className="mono"
-              placeholder="https://rbm.googleapis.com/v1/phones"
-              value={vGroup('rcs', 'jibeGatewayUrl', 'https://rbm.googleapis.com/v1/phones')}
-              onChange={setGroup('rcs', 'jibeGatewayUrl')}
-            />
-          </div>
-          <div className="field">
-            <label>Coût d'achat RCS (USD)</label>
-            <input
-              type="number"
-              step="0.001"
-              value={vGroup('rcs', 'buyCost', '0.012')}
-              onChange={setGroup('rcs', 'buyCost')}
-            />
-          </div>
-          <div className="field">
-            <label>Tarif facturé client RCS (USD)</label>
-            <input
-              type="number"
-              step="0.001"
-              value={vGroup('rcs', 'cost', '0.020')}
-              onChange={setGroup('rcs', 'cost')}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* SIMULATEUR INTERACTIF DE WEBHOOKS OPÉRATEURS (DLR & ENTRANTS MO) */}
-      {simNotice && (
-        <div className="notice ok" style={{ marginBottom: 16 }}>
-          {simNotice}
-        </div>
-      )}
-
-      <div className="grid-2" style={{ marginBottom: 20 }}>
-        <form className="card" style={{ marginBottom: 0 }} onSubmit={triggerSimulateDlr}>
-          <div className="card-header">
-            <div>
-              <h3>Simulateur d'Accusé de Réception Opérateur (Webhook DLR)</h3>
-              <p>
-                Simule le callback envoyé par le SMSC opérateur lorsqu'un SMS/WhatsApp arrive sur le téléphone du destinataire.
-              </p>
-            </div>
-          </div>
-          <div className="grid-2">
-            <div className="field">
-              <label>Référence transaction (vide = dernière envoyée)</label>
-              <input
-                className="mono"
-                placeholder="Ex. RAY-1001"
-                value={dlrSim.txRef}
-                onChange={e => setDlrSim({ ...dlrSim, txRef: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label>Statut DLR renvoyé par l'opérateur</label>
-              <select
-                value={dlrSim.status}
-                onChange={e =>
-                  setDlrSim({
-                    ...dlrSim,
-                    status: e.target.value,
-                    errCode: e.target.value === 'DELIVRD' ? '000' : '027'
-                  })
-                }
-              >
-                <option value="DELIVRD">DELIVRD 000 (Livré sur mobile)</option>
-                <option value="UNDELIV">UNDELIV 027 (Abonné hors réseau / Échec)</option>
-                <option value="REJECTD">REJECTD 088 (Rejeté par l'opérateur)</option>
-              </select>
-            </div>
-          </div>
-          <button type="submit" className="primary" style={{ width: '100%' }}>
-            Déclencher le Webhook DLR Opérateur
-          </button>
-        </form>
-
-        <form className="card" style={{ marginBottom: 0 }} onSubmit={triggerSimulateMo}>
-          <div className="card-header">
-            <div>
-              <h3>Simulateur de Réponse Abonné (Webhook SMS Entrant MO)</h3>
-              <p>
-                Simule un SMS entrant envoyé par un numéro RDC (+243) vers le Sender ID d'un de vos clients SaaS.
-              </p>
-            </div>
-          </div>
-          <div className="grid-2">
-            <div className="field">
-              <label>Numéro de l'abonné RDC (+243)</label>
-              <input
-                className="mono"
-                value={moSim.from}
-                onChange={e => setMoSim({ ...moSim, from: e.target.value })}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Sender ID du client SaaS destinataire</label>
-              <input
-                className="mono"
-                placeholder="KIVUTECH ou HORIZON"
-                value={moSim.toSenderId}
-                onChange={e => setMoSim({ ...moSim, toSenderId: e.target.value })}
-                required
-              />
-            </div>
-          </div>
-          <div className="field">
-            <label>Message envoyé par l'abonné</label>
-            <input
-              value={moSim.text}
-              onChange={e => setMoSim({ ...moSim, text: e.target.value })}
-              required
-            />
-          </div>
-          <button type="submit" className="primary" style={{ width: '100%' }}>
-            Simuler la réception du SMS entrant (MO)
-          </button>
-        </form>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Journal en temps réel des Webhooks Opérateurs (DLR, MO & Tests de routes)</h3>
-            <p>Historique des callbacks reçus sur vos endpoints /webhooks/dlr/* et /webhooks/inbound/*.</p>
-          </div>
-          <button className="sm" onClick={loadWebhooks}>
-            Actualiser ({whLogs.length})
-          </button>
-        </div>
-
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Événement</th>
-                <th>Opérateur</th>
-                <th>Client SaaS</th>
-                <th>Réf / MSISDN</th>
-                <th>Code DLR / Protocole</th>
-                <th>Latence</th>
-                <th>Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              {whLogs.map(w => (
-                <tr key={w.id}>
-                  <td className="mute" style={{ whiteSpace: 'nowrap' }}>
-                    {new Date(w.created_at).toLocaleString('fr-FR', {
-                      dateStyle: 'short',
-                      timeStyle: 'medium'
-                    })}
-                  </td>
-                  <td>
-                    <span className="badge neutral" style={{ textTransform: 'uppercase' }}>
-                      {w.event_type}
-                    </span>
-                  </td>
-                  <td className="cell-main">{w.operator}</td>
-                  <td>{w.tenant_name || 'Global'}</td>
-                  <td className="mono" style={{ fontSize: 12 }}>
-                    <div>{w.tx_ref || '—'}</div>
-                    <div className="mute">{w.msisdn || ''}</div>
-                  </td>
-                  <td className="mono">{w.dlr_code || '—'}</td>
-                  <td className="mono mute">{w.latency_ms ? `${w.latency_ms} ms` : '—'}</td>
-                  <td>
-                    <StatusIndicator status={w.status === 'ok' ? 'delivered' : w.status} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
+    </main>
   );
 }
 
@@ -7790,27 +6050,33 @@ function UnifiedInboxAndAutoResponder({ userEmail, meUsage, onRefreshUsage }) {
   );
 }
 
+
 /* ============================================================================
- * APPLICATION PRINCIPALE : SÉPARATION STRICTE C-PANEL vs ESPACE CLIENT
+ * APPLICATION ESPACE CLIENT CRM (PORTAIL CLIENT UNIQUEMENT)
  * ========================================================================== */
 export default function App() {
-  const [auth, setAuth] = useState(!!localStorage.token);
-  const [portalMode, setPortalMode] = useState(
-    localStorage.portalMode || (localStorage.userRole === 'superadmin' ? 'cpanel' : 'client')
-  );
-  const [cpanelTab, setCpanelTab] = useState('cpanel-dash');
-  const [clientTab, setClientTab] = useState('client-dash');
+  const [auth, setAuth] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.hash.startsWith('#impersonate=')) {
+      const impToken = decodeURIComponent(window.location.hash.slice('#impersonate='.length));
+      if (impToken) {
+        localStorage.client_token = impToken;
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        return true;
+      }
+    }
+    return !!localStorage.client_token;
+  });
+  const [tab, setTab] = useState('client-dash');
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [meUsage, setMeUsage] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const loadUsage = useCallback(() => {
-    if (!localStorage.token) return;
+    if (!localStorage.client_token) return;
     api('/me/usage')
       .then(info => {
         setMeUsage(info);
-        if (info?.user?.email) localStorage.userEmail = info.user.email;
-        if (info?.user?.role) localStorage.userRole = info.user.role;
+        if (info?.user?.email) localStorage.client_email = info.user.email;
       })
       .catch(() => {});
   }, []);
@@ -7819,71 +6085,14 @@ export default function App() {
     if (auth) loadUsage();
   }, [auth, loadUsage]);
 
-  const setPortal = mode => {
-    localStorage.portalMode = mode;
-    setPortalMode(mode);
-    setDrawerOpen(false);
-  };
-
-  // Connexion directe du Super-Admin dans l'Espace Client d'une entreprise depuis le C-Panel
-  const handleOpenClientWorkspace = async tenantId => {
-    try {
-      if (!localStorage.adminTokenBackup) {
-        localStorage.adminTokenBackup = localStorage.token;
-      }
-      const res = await api(`/admin/impersonate/${tenantId}`, { method: 'POST' });
-      localStorage.token = res.token;
-      localStorage.userEmail = res.email;
-      setPortal('client');
-      setClientTab('client-dash');
-      loadUsage();
-    } catch (e) {
-      alert(e.message);
-    }
-  };
-
-  // Retour en 1 clic à la Console C-Panel Super-Admin
-  const handleReturnToCPanel = () => {
-    if (localStorage.adminTokenBackup) {
-      localStorage.token = localStorage.adminTokenBackup;
-      localStorage.removeItem('adminTokenBackup');
-    }
-    localStorage.userRole = 'superadmin';
-    setPortal('cpanel');
-    setCpanelTab('cpanel-clients');
-    loadUsage();
-  };
-
   if (!auth) {
-    return (
-      <Login
-        onDone={initialPortal => {
-          setPortal(initialPortal || 'client');
-          setAuth(true);
-        }}
-      />
-    );
+    return <ClientLogin onDone={() => setAuth(true)} />;
   }
 
-  const role = meUsage?.user?.role || localStorage.userRole || 'client';
-  const isSuperAdmin = role === 'superadmin';
-  const hasAdminBackup = !!localStorage.adminTokenBackup;
-  const userEmail = meUsage?.user?.email || localStorage.userEmail || 'admin@rayons.cd';
+  const userEmail = meUsage?.user?.email || localStorage.client_email || '';
   const tenantName = meUsage?.company || 'Rayons CRM';
 
-  // Si l'utilisateur est en mode C-Panel et est bien Super-Admin -> Afficher la PARTIE 1 : C-PANEL
-  const showCPanel = isSuperAdmin && portalMode === 'cpanel' && !hasAdminBackup;
-
-  const cpanelNav = [
-    { key: 'cpanel-dash', label: 'Supervision SaaS', short: 'SaaS', icon: 'dash' },
-    { key: 'cpanel-clients', label: 'Clients et quotas', short: 'Clients', icon: 'clients' },
-    { key: 'cpanel-billing', label: 'Crédits et facturation', short: 'Crédits', icon: 'billing' },
-    { key: 'cpanel-routes', label: 'Routes télécoms maîtresses', short: 'Routes', icon: 'routes' },
-    { key: 'cpanel-reports', label: 'Rapports et analytique', short: 'Rapports', icon: 'reports' },
-    { key: 'cpanel-tx', label: 'Audit des transactions', short: 'Audit', icon: 'transactions' }
-  ];
-
-  const clientNav = [
+  const navItems = [
     { key: 'client-dash', label: 'Tableau de bord', short: 'Accueil', icon: 'dash' },
     {
       key: 'client-inbox',
@@ -7900,37 +6109,20 @@ export default function App() {
     { key: 'client-account', label: 'Mon email et clé API', short: 'Compte', icon: 'settings' }
   ];
 
-  const activeNavList = showCPanel ? cpanelNav : clientNav;
-  const currentTabKey = showCPanel ? cpanelTab : clientTab;
   const selectTab = key => {
-    if (showCPanel) setCpanelTab(key);
-    else setClientTab(key);
+    setTab(key);
     setDrawerOpen(false);
   };
 
   return (
     <>
-      {/* Bannière supérieure quand le Super-Admin inspecte la Partie Client */}
-      {(hasAdminBackup || (isSuperAdmin && !showCPanel)) && (
-        <div className="impersonation-bar">
-          <div>
-            <strong>PARTIE 2 : ESPACE CLIENT</strong> — Vous consultez l'espace CRM de{' '}
-            <strong>{tenantName}</strong> ({userEmail})
-          </div>
-          <button type="button" onClick={handleReturnToCPanel}>
-            Retourner à la Partie 1 (Console C-Panel)
-          </button>
-        </div>
-      )}
-
-      {/* Barre supérieure mobile */}
       <header className="mobile-topbar">
         <div className="brand-lockup">
           <div className="brand-mark-box">R</div>
-          <span>{showCPanel ? 'Rayons C-Panel' : tenantName}</span>
+          <span>{tenantName}</span>
         </div>
         <div className="row">
-          <span className="role-tag">{showCPanel ? 'C-PANEL ADMIN' : 'ESPACE CLIENT'}</span>
+          <span className="role-tag">ESPACE CLIENT</span>
           <button
             type="button"
             className="sm ghost"
@@ -7942,28 +6134,24 @@ export default function App() {
         </div>
       </header>
 
-      {drawerOpen && (
-        <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />
-      )}
+      {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
 
       <div className="app-shell">
-        <aside className={`sidebar ${showCPanel ? 'cpanel-theme' : ''} ${drawerOpen ? 'open' : ''}`}>
+        <aside className={`sidebar ${drawerOpen ? 'open' : ''}`}>
           <div>
             <div className="sidebar-header">
               <div className="brand-lockup">
                 <div className="brand-mark-box">R</div>
-                <span>{showCPanel ? 'Rayons C-Panel' : 'Rayons CRM'}</span>
+                <span>Rayons CRM</span>
               </div>
-              <span className="role-tag">
-                {showCPanel ? 'ADMIN SAAS' : 'CLIENT'}
-              </span>
+              <span className="role-tag">CLIENT</span>
             </div>
 
             <nav className="nav-menu">
-              {activeNavList.map(item => (
+              {navItems.map(item => (
                 <button
                   key={item.key}
-                  className={`nav-btn ${currentTabKey === item.key ? 'active' : ''}`}
+                  className={`nav-btn ${tab === item.key ? 'active' : ''}`}
                   onClick={() => selectTab(item.key)}
                   style={{ justifyContent: 'space-between' }}
                 >
@@ -7978,35 +6166,12 @@ export default function App() {
           </div>
 
           <div className="sidebar-footer">
-            {isSuperAdmin && showCPanel && (
-              <button
-                type="button"
-                className="sm primary"
-                style={{ width: '100%' }}
-                onClick={() => setPortal('client')}
-              >
-                Basculer vers Partie Client
-              </button>
-            )}
-            {(hasAdminBackup || (isSuperAdmin && !showCPanel)) && (
-              <button
-                type="button"
-                className="sm primary"
-                style={{ width: '100%' }}
-                onClick={handleReturnToCPanel}
-              >
-                Retourner au C-Panel
-              </button>
-            )}
-
             <div className="account-summary">
               <div className="avatar">{initials(userEmail)}</div>
               <div className="account-details">
                 <strong>{userEmail}</strong>
                 <span>
-                  {showCPanel
-                    ? 'Console C-Panel'
-                    : `${tenantName} • Forfait ${meUsage?.plan || 'Standard'}`}
+                  {tenantName} • Forfait {meUsage?.plan || 'Standard'}
                 </span>
               </div>
             </div>
@@ -8014,9 +6179,8 @@ export default function App() {
               className="sm"
               style={{ width: '100%' }}
               onClick={() => {
-                localStorage.removeItem('token');
-                localStorage.removeItem('userRole');
-                localStorage.removeItem('adminTokenBackup');
+                localStorage.removeItem('client_token');
+                localStorage.removeItem('client_email');
                 setMeUsage(null);
                 setAuth(false);
               }}
@@ -8027,78 +6191,56 @@ export default function App() {
         </aside>
 
         <main className="workspace">
-          {showCPanel ? (
-            /* ---------- RENDU PARTIE 1 : CONSOLE C-PANEL ---------- */
-            <>
-              {cpanelTab === 'cpanel-dash' && <CPanelDashboard onNavigate={selectTab} />}
-              {cpanelTab === 'cpanel-clients' && (
-                <AdminClientsPanel onOpenClientWorkspace={handleOpenClientWorkspace} />
-              )}
-              {cpanelTab === 'cpanel-billing' && <CPanelBilling />}
-              {cpanelTab === 'cpanel-routes' && <CPanelRoutes />}
-              {cpanelTab === 'cpanel-reports' && <ReportsCenter isGlobalCPanel={true} meUsage={meUsage} />}
-              {cpanelTab === 'cpanel-tx' && <TransactionsStats isGlobalCPanel={true} />}
-            </>
-          ) : (
-            /* ---------- RENDU PARTIE 2 : ESPACE CLIENT CRM ---------- */
-            <>
-              {clientTab === 'client-dash' && (
-                <ClientDashboard onNavigate={selectTab} meUsage={meUsage} />
-              )}
-              {clientTab === 'client-inbox' && (
-                <UnifiedInboxAndAutoResponder
-                  userEmail={userEmail}
-                  meUsage={meUsage}
-                  onRefreshUsage={loadUsage}
-                />
-              )}
-              {clientTab === 'client-contacts' && (
-                <Contacts
-                  userEmail={userEmail}
-                  meUsage={meUsage}
-                  onRefreshUsage={loadUsage}
-                  initialTemplate={selectedTemplate}
-                />
-              )}
-              {clientTab === 'client-mass' && (
-                <MassCampaignsStudio
-                  userEmail={userEmail}
-                  meUsage={meUsage}
-                  onRefreshUsage={loadUsage}
-                  onOpenEmailSettings={() => selectTab('client-account')}
-                  initialTemplate={selectedTemplate}
-                />
-              )}
-              {clientTab === 'client-templates' && (
-                <ClientTemplates
-                  onUseTemplate={tpl => {
-                    setSelectedTemplate(tpl);
-                    selectTab('client-contacts');
-                  }}
-                  onUseTemplateInMass={tpl => {
-                    setSelectedTemplate(tpl);
-                    selectTab('client-mass');
-                  }}
-                />
-              )}
-              {clientTab === 'client-reports' && (
-                <ReportsCenter isGlobalCPanel={false} meUsage={meUsage} />
-              )}
-              {clientTab === 'client-tx' && <TransactionsStats isGlobalCPanel={false} />}
-              {clientTab === 'client-account' && (
-                <ClientAccountSettings meUsage={meUsage} onRefreshUsage={loadUsage} />
-              )}
-            </>
+          {tab === 'client-dash' && <ClientDashboard onNavigate={selectTab} meUsage={meUsage} />}
+          {tab === 'client-inbox' && (
+            <UnifiedInboxAndAutoResponder
+              userEmail={userEmail}
+              meUsage={meUsage}
+              onRefreshUsage={loadUsage}
+            />
+          )}
+          {tab === 'client-contacts' && (
+            <Contacts
+              userEmail={userEmail}
+              meUsage={meUsage}
+              onRefreshUsage={loadUsage}
+              initialTemplate={selectedTemplate}
+            />
+          )}
+          {tab === 'client-mass' && (
+            <MassCampaignsStudio
+              userEmail={userEmail}
+              meUsage={meUsage}
+              onRefreshUsage={loadUsage}
+              onOpenEmailSettings={() => selectTab('client-account')}
+              initialTemplate={selectedTemplate}
+            />
+          )}
+          {tab === 'client-templates' && (
+            <ClientTemplates
+              onUseTemplate={tpl => {
+                setSelectedTemplate(tpl);
+                selectTab('client-contacts');
+              }}
+              onUseTemplateInMass={tpl => {
+                setSelectedTemplate(tpl);
+                selectTab('client-mass');
+              }}
+            />
+          )}
+          {tab === 'client-reports' && <ReportsCenter isGlobalCPanel={false} meUsage={meUsage} />}
+          {tab === 'client-tx' && <TransactionsStats isGlobalCPanel={false} />}
+          {tab === 'client-account' && (
+            <ClientAccountSettings meUsage={meUsage} onRefreshUsage={loadUsage} />
           )}
         </main>
       </div>
 
-      {/* Barre de navigation inférieure mobile */}
       <nav className="mobile-bottomnav">
-        {activeNavList.map(item => (
+        {navItems.map(item => (
           <button
             key={item.key}
-            className={currentTabKey === item.key ? 'active' : ''}
+            className={tab === item.key ? 'active' : ''}
             onClick={() => selectTab(item.key)}
           >
             <Icon name={item.icon} />

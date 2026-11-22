@@ -5,14 +5,17 @@ node_modules/
 # Environment & secrets
 .env
 backend/.env
-frontend/.env
+cpanel/.env
+client/.env
 *.local
 serviceAccountKey.json
 *-firebase-adminsdk-*.json
 
 # Local database & build artifacts
 backend/.pgdata/
-frontend/dist/
+cpanel/dist/
+client/dist/
+hosting-dist/
 
 # Firebase & OS
 .firebase/

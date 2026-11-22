@@ -3,10 +3,11 @@
 ## Démarrage rapide
 ```bash
 cd backend && cp .env.example .env && npm i && npm run dev
-cd ../frontend && npm i && npm run dev     # http://localhost:5173
+cd ../client && npm i && npm run dev       # Espace Client : http://localhost:5173
+cd ../cpanel && npm i && npm run dev       # Console C-Panel : http://localhost:5174
 ```
 
-### Compte par défaut
+### Compte administrateur C-Panel par défaut
 - **Email** : `admin@rayons.cd`
 - **Mot de passe** : `admin1234`
 
@@ -21,19 +22,20 @@ cd ../frontend && npm i && npm run dev     # http://localhost:5173
    - Tableaux analytiques par opérateur, historique journalier et export CSV complet.
 
 ## Déploiement Firebase (`crm-rayons`)
-- **Frontend (Firebase Hosting)** : `https://crm-rayons.web.app`
+- **Espace Client (Firebase Hosting)** : `https://crm-rayons.web.app` (dossier `client/`)
+- **Console C-Panel (Firebase Hosting)** : `https://crm-rayons.web.app/cpanel` (dossier `cpanel/`)
 - **Backend API (Cloud Functions v2)** : `backend/src/firebase.js` (`europe-west1`), routé automatiquement via `/api/**` et `/webhooks/**`
 - **Base de données (Cloud Firestore)** : collections `tenants`, `users`, `contacts`, `campaigns`, `messages`, `templates`, `auto_reply_rules`, `credit_logs`, `recharge_requests`, `blacklist`, `webhook_logs`, `audit_logs`
 
 ```bash
-# Construire le frontend
-npm --prefix frontend run build
+# Construire les deux applications (client + cpanel) pour Firebase Hosting
+node scripts/build-hosting.mjs
 
 # Déployer Hosting, Functions et règles Firestore
 npx -y firebase-tools@latest deploy --project crm-rayons
 
-# Migrer les données locales (.pgdata) vers Cloud Firestore
-npm --prefix backend run firebase:migrate
+# Réinitialiser Firestore proprement (sans données de démo)
+npm --prefix backend run firebase:reset
 ```
 
 ## Webhooks Directs

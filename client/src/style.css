@@ -1602,3 +1602,53 @@ tbody tr:last-child td {
   margin-bottom: 6px;
 }
 
+
+
+/* ---------- Minimal Centered Login Card ---------- */
+.auth-centered {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.auth-brand-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.pwd-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pwd-field input {
+  padding-right: 78px;
+}
+
+.pwd-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.pwd-toggle:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text);
+}

@@ -19,7 +19,7 @@
     }
   ],
   "hosting": {
-    "public": "frontend/dist",
+    "public": "hosting-dist",
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -40,6 +40,14 @@
           "functionId": "api",
           "region": "europe-west1"
         }
+      },
+      {
+        "source": "/cpanel/**",
+        "destination": "/cpanel/index.html"
+      },
+      {
+        "source": "/cpanel",
+        "destination": "/cpanel/index.html"
       },
       {
         "source": "**",
