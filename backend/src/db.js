@@ -42,6 +42,8 @@ let queryFnPromise;
 export let dbEngineType = 'postgresql';
 
 export const generateApiKey = () => 'ray_live_' + crypto.randomBytes(16).toString('hex');
+export const generateClientId = () => 'cli_' + crypto.randomBytes(8).toString('hex');
+export const generateApiSecret = () => 'sec_' + crypto.randomBytes(20).toString('hex');
 
 export const PLAN_PRESETS = {
   starter: {
@@ -167,6 +169,12 @@ export const DEFAULT_TELECOM_SETTINGS = {
     replyTo: 'admin@rayons.net',
     signature: 'Cordialement,\nService Client',
     mode: 'auto'
+  },
+  channels: {
+    sms: { enabled: true, maintenanceNote: '' },
+    whatsapp: { enabled: true, maintenanceNote: '' },
+    rcs: { enabled: true, maintenanceNote: '' },
+    email: { enabled: true, maintenanceNote: '' }
   }
 };
 
@@ -174,8 +182,11 @@ async function runMigrationsAndSeed(execQuery) {
   await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'business'");
   await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'");
   await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sender_id TEXT NOT NULL DEFAULT 'RAYONS'");
+  await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS client_id TEXT");
   await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS api_key TEXT");
+  await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS api_secret_hash TEXT");
   await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS limits JSONB NOT NULL DEFAULT '{}'");
+  await execQuery("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS channel_flags JSONB NOT NULL DEFAULT '{}'");
 
   await execQuery(`
     CREATE TABLE IF NOT EXISTS campaigns (
@@ -325,6 +336,24 @@ async function runMigrationsAndSeed(execQuery) {
     )
   `);
 
+  await execQuery(`
+    CREATE TABLE IF NOT EXISTS accounting_entries (
+      id SERIAL PRIMARY KEY,
+      tenant_id INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      entry_type TEXT NOT NULL,
+      channel TEXT NOT NULL DEFAULT 'all',
+      quantity INT NOT NULL DEFAULT 0,
+      amount_usd NUMERIC(10,4) NOT NULL DEFAULT 0,
+      buy_cost_usd NUMERIC(10,4) NOT NULL DEFAULT 0,
+      margin_usd NUMERIC(10,4) NOT NULL DEFAULT 0,
+      payment_method TEXT,
+      reference TEXT,
+      note TEXT,
+      actor_email TEXT,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+
   const adminEmail = (process.env.ADMIN_EMAIL || 'danielkiboko218@gmail.com').trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
   const existingAdmin = await execQuery("SELECT id, tenant_id FROM users WHERE role='superadmin' LIMIT 1");
@@ -349,10 +378,14 @@ async function runMigrationsAndSeed(execQuery) {
     );
   }
 
-  // Attribuer une clé API à tous les tenants qui n'en ont pas encore
-  const withoutKey = await execQuery('SELECT id FROM tenants WHERE api_key IS NULL');
+  // Attribuer une clé API et un client_id à tous les tenants qui n'en ont pas encore
+  const withoutKey = await execQuery('SELECT id, api_key, client_id FROM tenants WHERE api_key IS NULL OR client_id IS NULL');
   for (const row of withoutKey) {
-    await execQuery('UPDATE tenants SET api_key=$1 WHERE id=$2', [generateApiKey(), row.id]);
+    await execQuery('UPDATE tenants SET api_key=COALESCE(api_key,$1), client_id=COALESCE(client_id,$2) WHERE id=$3', [
+      generateApiKey(),
+      generateClientId(),
+      row.id
+    ]);
   }
 }
 

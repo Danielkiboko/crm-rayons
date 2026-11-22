@@ -537,150 +537,243 @@ function CPanelLogin({ onDone }) {
 
 function CPanelDashboard({ onNavigate }) {
   const [s, setS] = useState(null);
-  const [clientsData, setClientsData] = useState({ clients: [] });
+  const [overview, setOverview] = useState(null);
+  const [toggling, setToggling] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api('/stats?allTenants=1').then(setS).catch(console.error);
-    api('/admin/clients').then(setClientsData).catch(console.error);
+    api('/admin/overview').then(setOverview).catch(console.error);
   }, []);
 
-  if (!s) return <div className="card mute">Chargement de la supervision C-Panel…</div>;
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const totals = s.totals || {
-    total_tx: 0,
-    success_tx: 0,
-    delivered_tx: 0,
-    failed_tx: 0,
-    out_tx: 0,
-    in_tx: 0,
-    total_cost: 0,
-    total_buy_cost: 0,
-    avg_latency_ms: 38
+  const handleToggleChannel = async (ch, currentEnabled) => {
+    setToggling(ch);
+    try {
+      await api(`/admin/channels/${ch}/toggle`, {
+        method: 'PUT',
+        body: { enabled: !currentEnabled }
+      });
+      load();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setToggling('');
+    }
   };
-  const successRate =
-    totals.total_tx > 0 ? Math.round((totals.success_tx / totals.total_tx) * 100) : 100;
-  const activeClients = clientsData.clients.filter(c => c.status !== 'suspended').length;
-  const netMarginUsd = Number(totals.total_cost || 0) - Number(totals.total_buy_cost || 0);
+
+  if (!s || !overview) return <div className="card mute">Chargement de l'administration centrale…</div>;
+
+  const totals = overview.totals || {};
+  const chTotals = totals.channels || {};
+  const channelsStatus = overview.channelsStatus || [];
+  const clientBalances = overview.clientBalances || [];
+  const alerts = overview.lowBalanceAlerts || [];
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h2>Supervision Globale — C-Panel SaaS</h2>
+          <h2>Administration Centrale — C-Panel Rayons</h2>
           <p>
-            Vue consolidée de tous vos comptes clients, de la marge télécom et des accusés de réception opérateurs (DLR).
+            Comptabilité clients, suivi en temps réel des SMS / WhatsApp / RCS / Emails restants, gestion des credentials et pilotage central des 4 backends.
           </p>
         </div>
         <div className="row">
-          <button onClick={() => onNavigate('cpanel-routes')}>Passerelles & DLR</button>
-          <button onClick={() => onNavigate('cpanel-billing')}>Recharger un client</button>
+          <button onClick={load}>Actualiser</button>
+          <button onClick={() => onNavigate('cpanel-billing')}>Comptabilité & Crédits</button>
           <button className="primary" onClick={() => onNavigate('cpanel-clients')}>
-            Gérer les comptes clients
+            Clients & Credentials
           </button>
         </div>
       </div>
 
       <div className="metrics-grid">
         <div className="metric-card">
-          <div className="metric-label">
-            <span>Comptes clients SaaS</span>
-          </div>
-          <div className="metric-value">{clientsData.clients.length}</div>
+          <div className="metric-label"><span>Entreprises clientes</span></div>
+          <div className="metric-value">{totals.totalClients || 0}</div>
           <div className="metric-foot">
-            <span>Actifs : {activeClients}</span>
-            <span>Contacts totaux : {s.contacts}</span>
+            <span>Actifs : {totals.activeClients || 0}</span>
+            <span>Suspendus : {totals.suspendedClients || 0}</span>
           </div>
         </div>
 
         <div className="metric-card">
-          <div className="metric-label">
-            <span>Transactions & DLR</span>
-          </div>
-          <div className="metric-value">{totals.total_tx}</div>
+          <div className="metric-label"><span>SMS restants (tous clients)</span></div>
+          <div className="metric-value">{(chTotals.sms?.remaining || 0).toLocaleString('fr-FR')}</div>
           <div className="metric-foot">
-            <span>Livrés (DLR) : {totals.delivered_tx || 0}</span>
-            <span>Entrants (MO) : {totals.in_tx}</span>
+            <span>Alloués : {(chTotals.sms?.allocated || 0).toLocaleString('fr-FR')}</span>
+            <span>Consommés : {(chTotals.sms?.used || 0).toLocaleString('fr-FR')}</span>
           </div>
         </div>
 
         <div className="metric-card">
-          <div className="metric-label">
-            <span>Délivrabilité & Latence</span>
-          </div>
-          <div className="metric-value">{successRate}%</div>
+          <div className="metric-label"><span>Comptabilité & Revenus USD</span></div>
+          <div className="metric-value">${Number(totals.totalRevenueUsd || 0).toFixed(2)}</div>
           <div className="metric-foot">
-            <span>Latence moy. : {totals.avg_latency_ms || 38} ms</span>
-            <span className={totals.failed_tx > 0 ? 'err-text' : ''}>
-              Échecs : {totals.failed_tx}
-            </span>
-          </div>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-label">
-            <span>Revenu Facturé & Marge SaaS</span>
-          </div>
-          <div className="metric-value">${Number(totals.total_cost || 0).toFixed(3)}</div>
-          <div className="metric-foot">
-            <span>Achat opérateur : ${Number(totals.total_buy_cost || 0).toFixed(3)}</span>
+            <span>Crédits vendus : ${Number(totals.totalCreditedUsd || 0).toFixed(2)}</span>
             <span style={{ color: 'var(--green)', fontWeight: 600 }}>
-              Marge : +${netMarginUsd.toFixed(3)}
+              Marge : +${Number(totals.totalNetMarginUsd || 0).toFixed(2)}
             </span>
+          </div>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-label"><span>Alertes & Demandes</span></div>
+          <div className="metric-value">{alerts.length + (overview.pendingRechargesCount || 0)}</div>
+          <div className="metric-foot">
+            <span>Soldes bas : {alerts.length}</span>
+            <span>Recharges en attente : {overview.pendingRechargesCount || 0}</span>
           </div>
         </div>
       </div>
 
+      {/* PILOTAGE CENTRAL DES 4 BACKENDS CANAUX */}
       <div className="card">
         <div className="card-header">
           <div>
-            <h3>Consommation par entreprise cliente</h3>
-            <p>Aperçu rapide des quotas utilisés par chaque client créé dans le C-Panel.</p>
+            <h3>Pilotage central des 4 Backends Canaux interconnectés</h3>
+            <p>Activez ou coupez globalement chaque backend (WhatsApp, Email, SMS, RCS) et suivez le stock restant.</p>
+          </div>
+          <button className="sm" onClick={() => onNavigate('cpanel-routes')}>
+            Passerelles & Tarifs
+          </button>
+        </div>
+        <div className="channel-grid-4">
+          {channelsStatus.map(ch => {
+            const stock = chTotals[ch.channel] || { allocated: 0, used: 0, remaining: 0 };
+            return (
+              <div key={ch.channel} className={`channel-ctrl-card ${ch.enabled ? 'is-on' : 'is-off'}`}>
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <span className={`badge ${ch.channel}`}>{ch.label}</span>
+                    <div className="mono mute" style={{ fontSize: 11, marginTop: 6 }}>{ch.endpointBase}</div>
+                  </div>
+                  <span className={`status-pill ${ch.enabled ? 'active' : 'suspended'}`}>
+                    <span className="status-dot" />
+                    {ch.enabled ? 'En ligne' : 'Coupé'}
+                  </span>
+                </div>
+                <div style={{ margin: '12px 0' }}>
+                  <div style={{ fontSize: 20, fontWeight: 700 }} className="tabular">
+                    {stock.remaining.toLocaleString('fr-FR')}
+                  </div>
+                  <div className="mute" style={{ fontSize: 12 }}>
+                    restants • {stock.used.toLocaleString('fr-FR')} envoyés • Taux {ch.metrics?.deliveryRate ?? 100}%
+                  </div>
+                </div>
+                <div className="mute" style={{ fontSize: 11.5, marginBottom: 10 }}>{ch.gatewayInfo}</div>
+                <button
+                  type="button"
+                  className={`sm ${ch.enabled ? 'danger' : 'primary'}`}
+                  style={{ width: '100%' }}
+                  disabled={toggling === ch.channel}
+                  onClick={() => handleToggleChannel(ch.channel, ch.enabled)}
+                >
+                  {toggling === ch.channel
+                    ? 'Mise à jour…'
+                    : ch.enabled
+                    ? `Couper ${ch.label}`
+                    : `Activer ${ch.label}`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {alerts.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h3>Alertes de soldes bas ({alerts.length})</h3>
+              <p>Clients ayant 15 % ou moins de messages ou de crédit USD restants.</p>
+            </div>
+            <button className="sm primary" onClick={() => onNavigate('cpanel-billing')}>
+              Créditer maintenant
+            </button>
+          </div>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+            {alerts.map((a, idx) => (
+              <span key={idx} className="badge neutral">
+                {a.company} — {a.channel.toUpperCase()} : {a.remaining} restant(s) ({a.percentRemaining}%)
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h3>Comptabilité et messages restants par client</h3>
+            <p>Suivi exact du nombre de SMS, WhatsApp, RCS, Emails restants et du solde USD par entreprise.</p>
           </div>
           <button className="sm" onClick={() => onNavigate('cpanel-clients')}>
-            Ouvrir la gestion des clients
+            Créer un client & credentials
           </button>
         </div>
 
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Forfait</th>
-                <th>Sender ID</th>
-                <th>Contacts</th>
-                <th>Transactions</th>
-                <th>Budget consommé</th>
-                <th>Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              {clientsData.clients.map(c => (
-                <tr key={c.id}>
-                  <td>
-                    <div className="cell-main">{c.name}</div>
-                    <div className="cell-sub mono">{c.email}</div>
-                  </td>
-                  <td style={{ textTransform: 'capitalize' }}>{c.plan}</td>
-                  <td className="mono">{c.sender_id}</td>
-                  <td className="mono">
-                    {c.used_contacts} / {c.limits?.maxContacts || 500}
-                  </td>
-                  <td className="mono">{c.total_tx}</td>
-                  <td className="mono">
-                    ${Number(c.used_spend || 0).toFixed(2)} / ${c.limits?.maxSpendUsd || 25}
-                  </td>
-                  <td>
-                    <span className={`status-pill ${c.status === 'suspended' ? 'suspended' : 'active'}`}>
-                      <span className="status-dot" />
-                      {c.status === 'suspended' ? 'Suspendu' : 'Actif'}
-                    </span>
-                  </td>
+        {clientBalances.length === 0 ? (
+          <p className="mute">Aucun client enregistré. Créez votre premier compte client dans « Clients & Credentials ».</p>
+        ) : (
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Entreprise</th>
+                  <th>SMS restants</th>
+                  <th>WhatsApp restants</th>
+                  <th>RCS restants</th>
+                  <th>Emails restants</th>
+                  <th>Solde USD restant</th>
+                  <th>Marge nette</th>
+                  <th>Statut</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {clientBalances.map(c => (
+                  <tr key={c.id}>
+                    <td>
+                      <div className="cell-main">{c.name}</div>
+                      <div className="cell-sub mono">{c.clientId || c.senderId}</div>
+                    </td>
+                    <td className="mono" style={{ fontWeight: 600 }}>
+                      {c.quotas.sms.remaining.toLocaleString('fr-FR')}{' '}
+                      <span className="mute">/ {c.quotas.sms.max}</span>
+                    </td>
+                    <td className="mono">
+                      {c.quotas.whatsapp.remaining.toLocaleString('fr-FR')}{' '}
+                      <span className="mute">/ {c.quotas.whatsapp.max}</span>
+                    </td>
+                    <td className="mono">
+                      {c.quotas.rcs.remaining.toLocaleString('fr-FR')}{' '}
+                      <span className="mute">/ {c.quotas.rcs.max}</span>
+                    </td>
+                    <td className="mono">
+                      {c.quotas.email.remaining.toLocaleString('fr-FR')}{' '}
+                      <span className="mute">/ {c.quotas.email.max}</span>
+                    </td>
+                    <td className="mono" style={{ fontWeight: 600 }}>
+                      ${c.financial.remainingSpendUsd.toFixed(2)}
+                    </td>
+                    <td className="mono" style={{ color: 'var(--green)' }}>
+                      +${c.financial.netMarginUsd.toFixed(2)}
+                    </td>
+                    <td>
+                      <span className={`status-pill ${c.status === 'suspended' ? 'suspended' : 'active'}`}>
+                        <span className="status-dot" />
+                        {c.status === 'suspended' ? 'Suspendu' : 'Actif'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -738,10 +831,13 @@ function CPanelDashboard({ onNavigate }) {
   );
 }
 
-function AdminClientsPanel({ onOpenClientWorkspace }) {
+function AdminClientsPanel() {
   const [data, setData] = useState({ clients: [], presets: {} });
   const [showCreate, setShowCreate] = useState(false);
   const [editClient, setEditClient] = useState(null);
+  const [credModal, setCredModal] = useState(null);
+  const [createdCreds, setCreatedCreds] = useState(null);
+  const [credPwd, setCredPwd] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -757,7 +853,7 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
     maxRcs: 500,
     maxEmails: 5000,
     maxSpendUsd: 25,
-    allowedChannels: ['sms', 'whatsapp', 'email']
+    allowedChannels: ['sms', 'whatsapp', 'rcs', 'email']
   });
 
   const load = useCallback(() => {
@@ -804,7 +900,7 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
     setErr('');
     setMsg('');
     try {
-      await api('/admin/clients', {
+      const created = await api('/admin/clients', {
         method: 'POST',
         body: {
           company: form.company,
@@ -823,7 +919,8 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
           }
         }
       });
-      setMsg(`Compte client "${form.company}" (${form.email}) créé avec succès.`);
+      setCreatedCreds(created.credentials || null);
+      setMsg(`Compte client "${form.company}" (${form.email}) créé avec ses credentials API et connexion.`);
       setShowCreate(false);
       setForm({
         company: '',
@@ -837,7 +934,7 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
         maxRcs: 500,
         maxEmails: 5000,
         maxSpendUsd: 25,
-        allowedChannels: ['sms', 'whatsapp', 'email']
+        allowedChannels: ['sms', 'whatsapp', 'rcs', 'email']
       });
       load();
     } catch (e) {
@@ -907,22 +1004,72 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
     load();
   };
 
+  const rotateClientCredentials = async (clientId, opts) => {
+    setErr('');
+    setMsg('');
+    try {
+      const res = await api(`/admin/clients/${clientId}/credentials/rotate`, {
+        method: 'POST',
+        body: opts
+      });
+      setCreatedCreds(res.credentials);
+      setCredPwd('');
+      setCredModal(null);
+      setMsg(`Credentials mis à jour pour ${res.credentials.company}.`);
+      load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  const toggleClientChannel = async (client, ch) => {
+    const cur = client.limits?.allowedChannels || ['sms', 'whatsapp', 'rcs', 'email'];
+    const next = cur.includes(ch) ? cur.filter(x => x !== ch) : [...cur, ch];
+    await api(`/admin/clients/${client.id}/channels`, {
+      method: 'PATCH',
+      body: { allowedChannels: next }
+    });
+    load();
+  };
+
   return (
     <>
       <div className="page-header">
         <div>
-          <h2>Comptes Clients et Limites d'utilisation</h2>
+          <h2>Clients, Credentials et Messages Restants</h2>
           <p>
-            Créez des comptes clients, définissez leurs plafonds mensuels et accédez en un clic à leur Espace Client.
+            Créez les comptes clients, générez leurs identifiants (Email, mot de passe, Client ID, API Key/Secret) et pilotez leurs quotas restants.
           </p>
         </div>
         <div className="row">
           <button onClick={load}>Actualiser</button>
           <button className="primary" onClick={() => setShowCreate(!showCreate)}>
-            {showCreate ? 'Fermer le formulaire' : 'Nouveau compte client'}
+            {showCreate ? 'Fermer le formulaire' : 'Créer un client & credentials'}
           </button>
         </div>
       </div>
+
+      {createdCreds && (
+        <div className="card" style={{ borderColor: 'var(--primary)' }}>
+          <div className="card-header">
+            <div>
+              <h3>Credentials générés — {createdCreds.company}</h3>
+              <p>Transmettez ces identifiants de manière sécurisée au client (le secret API n'est affiché qu'une seule fois).</p>
+            </div>
+            <button className="sm ghost" onClick={() => setCreatedCreds(null)}>
+              Fermer
+            </button>
+          </div>
+          <div className="grid-2" style={{ gap: 10 }}>
+            <div className="cred-pill"><strong>Email connexion</strong><span className="mono">{createdCreds.loginEmail}</span></div>
+            {createdCreds.password && <div className="cred-pill"><strong>Mot de passe initial</strong><span className="mono">{createdCreds.password}</span></div>}
+            {createdCreds.newPassword && <div className="cred-pill"><strong>Nouveau mot de passe</strong><span className="mono">{createdCreds.newPassword}</span></div>}
+            <div className="cred-pill"><strong>Client ID</strong><span className="mono">{createdCreds.clientId}</span></div>
+            <div className="cred-pill"><strong>API Key</strong><span className="mono">{createdCreds.apiKey}</span></div>
+            {createdCreds.apiSecret && <div className="cred-pill"><strong>API Secret</strong><span className="mono">{createdCreds.apiSecret}</span></div>}
+          </div>
+        </div>
+      )}
 
       {msg && (
         <div className="notice ok" style={{ marginBottom: 16 }}>
@@ -1084,8 +1231,8 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
       <div className="card">
         <div className="card-header">
           <div>
-            <h3>Entreprises clientes ({data.clients.length})</h3>
-            <p>Cliquez sur « Ouvrir Espace Client » pour accéder directement au portail CRM d'un client.</p>
+            <h3>Entreprises clientes ({data.clients.filter(c => c.role !== 'superadmin').length})</h3>
+            <p>Suivi des messages restants par canal, activation des 4 backends et gestion des credentials clients (aucun lancement de campagne depuis le C-Panel).</p>
           </div>
         </div>
 
@@ -1093,92 +1240,162 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
           <table>
             <thead>
               <tr>
-                <th>Entreprise et compte</th>
+                <th>Entreprise & Client ID</th>
                 <th>Forfait</th>
-                <th>Sender ID</th>
-                <th>Contacts</th>
-                <th>Quotas mensuels (Utilisés / Max)</th>
-                <th>Budget USD</th>
+                <th>Messages restants par canal</th>
+                <th>Canaux actifs</th>
+                <th>Solde USD restant</th>
                 <th>Statut</th>
                 <th style={{ textAlign: 'right' }}>Actions C-Panel</th>
               </tr>
             </thead>
             <tbody>
-              {data.clients.map(c => {
-                const lim = c.limits || {};
-                return (
-                  <tr key={c.id}>
-                    <td>
-                      <div className="cell-main">
-                        {c.name}{' '}
-                        {c.role === 'superadmin' && (
-                          <span className="badge neutral">Master</span>
-                        )}
-                      </div>
-                      <div className="cell-sub mono">{c.email}</div>
-                    </td>
-                    <td>
-                      <span className="badge neutral" style={{ textTransform: 'capitalize' }}>
-                        {c.plan}
-                      </span>
-                    </td>
-                    <td className="mono">{c.sender_id}</td>
-                    <td className="mono">
-                      {c.used_contacts} / {lim.maxContacts || 500}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      <div>
-                        SMS : <span className="mono">{c.used_sms}/{lim.maxSms}</span> • WhatsApp :{' '}
-                        <span className="mono">{c.used_whatsapp}/{lim.maxWhatsapp}</span>
-                      </div>
-                      <div className="mute">
-                        RCS : <span className="mono">{c.used_rcs}/{lim.maxRcs}</span> • Email :{' '}
-                        <span className="mono">{c.used_email}/{lim.maxEmails}</span>
-                      </div>
-                    </td>
-                    <td className="mono">
-                      ${Number(c.used_spend || 0).toFixed(2)} / ${lim.maxSpendUsd || 25}
-                    </td>
-                    <td>
-                      <span className={`status-pill ${c.status === 'suspended' ? 'suspended' : 'active'}`}>
-                        <span className="status-dot" />
-                        {c.status === 'suspended' ? 'Suspendu' : 'Actif'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button
-                        className="sm primary"
-                        onClick={() => onOpenClientWorkspace(c.id)}
-                      >
-                        Ouvrir Espace Client
-                      </button>{' '}
-                      <button className="sm" onClick={() => openEditModal(c)}>
-                        Limites
-                      </button>{' '}
-                      {c.role !== 'superadmin' && (
-                        <>
-                          <button className="sm" onClick={() => toggleStatus(c)}>
-                            {c.status === 'suspended' ? 'Activer' : 'Suspendre'}
-                          </button>{' '}
-                          <button
-                            className="sm danger"
-                            onClick={async () => {
-                              await api(`/admin/clients/${c.id}`, { method: 'DELETE' });
-                              load();
-                            }}
-                          >
-                            Supprimer
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {data.clients
+                .filter(c => c.role !== 'superadmin')
+                .map(c => {
+                  const lim = c.limits || {};
+                  const allowed = lim.allowedChannels || ['sms', 'whatsapp', 'rcs', 'email'];
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        <div className="cell-main">{c.name}</div>
+                        <div className="cell-sub mono">{c.email}</div>
+                        <div className="cell-sub mono mute">{c.client_id || `ID #${c.id}`} • {c.sender_id}</div>
+                      </td>
+                      <td>
+                        <span className="badge neutral" style={{ textTransform: 'capitalize' }}>
+                          {c.plan}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        <div>
+                          SMS : <strong className="mono">{(c.remaining_sms ?? 0).toLocaleString('fr-FR')}</strong>{' '}
+                          <span className="mute">/ {lim.maxSms || 0}</span> • WA :{' '}
+                          <strong className="mono">{(c.remaining_whatsapp ?? 0).toLocaleString('fr-FR')}</strong>
+                        </div>
+                        <div className="mute">
+                          RCS : <strong className="mono">{(c.remaining_rcs ?? 0).toLocaleString('fr-FR')}</strong> • Email :{' '}
+                          <strong className="mono">{(c.remaining_email ?? 0).toLocaleString('fr-FR')}</strong>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                          {['whatsapp', 'email', 'sms', 'rcs'].map(ch => (
+                            <button
+                              key={ch}
+                              type="button"
+                              className={`sm ${allowed.includes(ch) ? 'primary' : ''}`}
+                              style={{ padding: '2px 7px', fontSize: 11 }}
+                              title={`Activer/Désactiver ${ch.toUpperCase()}`}
+                              onClick={() => toggleClientChannel(c, ch)}
+                            >
+                              {ch.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="mono">
+                        <strong>${Number(c.remaining_spend_usd ?? 0).toFixed(2)}</strong>
+                        <div className="cell-sub mute">Dépensé : ${Number(c.used_spend || 0).toFixed(2)}</div>
+                      </td>
+                      <td>
+                        <span className={`status-pill ${c.status === 'suspended' ? 'suspended' : 'active'}`}>
+                          <span className="status-dot" />
+                          {c.status === 'suspended' ? 'Suspendu' : 'Actif'}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button className="sm primary" onClick={() => setCredModal(c)}>
+                          Credentials
+                        </button>{' '}
+                        <button className="sm" onClick={() => openEditModal(c)}>
+                          Quotas
+                        </button>{' '}
+                        <button className="sm" onClick={() => toggleStatus(c)}>
+                          {c.status === 'suspended' ? 'Activer' : 'Suspendre'}
+                        </button>{' '}
+                        <button
+                          className="sm danger"
+                          onClick={async () => {
+                            await api(`/admin/clients/${c.id}`, { method: 'DELETE' });
+                            load();
+                          }}
+                        >
+                          Supprimer
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
       </div>
+
+      {credModal && (
+        <div className="modal-overlay" onClick={() => setCredModal(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Credentials — {credModal.name}</h3>
+              <button className="sm ghost" onClick={() => setCredModal(null)}>
+                <Icon name="close" />
+              </button>
+            </div>
+            <div className="modal-content">
+              <div className="field">
+                <label>Email de connexion</label>
+                <input readOnly value={credModal.email || ''} />
+              </div>
+              <div className="field">
+                <label>Client ID</label>
+                <input readOnly className="mono" value={credModal.client_id || '—'} />
+              </div>
+              <div className="field">
+                <label>Clé API active (X-API-Key)</label>
+                <input readOnly className="mono" value={credModal.api_key || '—'} />
+              </div>
+              <div className="field">
+                <label>Réinitialiser le mot de passe client (optionnel, 8+ car.)</label>
+                <input
+                  type="password"
+                  placeholder="Nouveau mot de passe pour ce client"
+                  value={credPwd}
+                  onChange={e => setCredPwd(e.target.value)}
+                />
+              </div>
+              <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    rotateClientCredentials(credModal.id, {
+                      rotateApiKey: true,
+                      rotateApiSecret: true,
+                      newPassword: credPwd || undefined
+                    })
+                  }
+                >
+                  Régénérer API Key + Secret
+                </button>
+                {credPwd.length >= 8 && (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() =>
+                      rotateClientCredentials(credModal.id, {
+                        rotateApiKey: false,
+                        rotateApiSecret: false,
+                        newPassword: credPwd
+                      })
+                    }
+                  >
+                    Mettre à jour le mot de passe
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editClient && (
         <div className="modal-overlay" onClick={() => setEditClient(null)}>
@@ -1310,9 +1527,14 @@ function AdminClientsPanel({ onOpenClientWorkspace }) {
 
 function CPanelBilling() {
   const [data, setData] = useState({ clients: [], creditLogs: [], rechargeRequests: [] });
+  const [ledger, setLedger] = useState([]);
   const [f, setF] = useState({
     tenantId: '',
     amountUsd: '25',
+    packSms: '1000',
+    packWhatsapp: '0',
+    packRcs: '0',
+    packEmail: '0',
     paymentMethod: 'M-Pesa Vodacom',
     reference: '',
     note: ''
@@ -1324,11 +1546,14 @@ function CPanelBilling() {
     api('/admin/clients')
       .then(res => {
         setData(res);
-        if (!f.tenantId && res.clients?.length > 0) {
-          const firstClient = res.clients.find(c => c.role !== 'superadmin') || res.clients[0];
-          setF(prev => ({ ...prev, tenantId: String(firstClient.id) }));
+        const onlyClients = (res.clients || []).filter(c => c.role !== 'superadmin');
+        if (!f.tenantId && onlyClients.length > 0) {
+          setF(prev => ({ ...prev, tenantId: String(onlyClients[0].id) }));
         }
       })
+      .catch(console.error);
+    api('/admin/accounting/ledger')
+      .then(res => setLedger(res.entries || []))
       .catch(console.error);
   }, [f.tenantId]);
 
@@ -1341,20 +1566,28 @@ function CPanelBilling() {
     setMsg('');
     setErr('');
     try {
-      const out = await api(`/admin/clients/${f.tenantId}/recharge`, {
+      const out = await api(`/admin/clients/${f.tenantId}/credit`, {
         method: 'POST',
         body: {
-          amountUsd: +f.amountUsd,
+          amountUsd: Number(f.amountUsd || 0),
+          packs: {
+            sms: Number(f.packSms || 0),
+            whatsapp: Number(f.packWhatsapp || 0),
+            rcs: Number(f.packRcs || 0),
+            email: Number(f.packEmail || 0)
+          },
           paymentMethod: f.paymentMethod,
           reference: f.reference,
           note: f.note
         }
       });
-      setMsg(`Crédit rechargé (+${f.amountUsd} USD). Nouveau plafond : $${out.newMaxSpendUsd} USD.`);
+      setMsg(
+        `Compte crédité (Réf. ${out.reference}) — SMS restants : ${out.accounting?.quotas?.sms?.remaining ?? 0}, Solde USD restant : $${(out.accounting?.financial?.remainingSpendUsd ?? 0).toFixed(2)}.`
+      );
       setF(prev => ({ ...prev, reference: '', note: '' }));
       load();
-    } catch (e) {
-      setErr(e.message);
+    } catch (e2) {
+      setErr(e2.message);
     }
   };
 
@@ -1559,24 +1792,65 @@ function CPanelBilling() {
               onChange={e => setF({ ...f, tenantId: e.target.value })}
               required
             >
-              {data.clients.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.email}) — Plafond actuel : ${c.limits?.maxSpendUsd || 25}
-                </option>
-              ))}
+              {data.clients
+                .filter(c => c.role !== 'superadmin')
+                .map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.email}) — SMS restants : {c.remaining_sms ?? 0} • Solde : $
+                    {Number(c.remaining_spend_usd ?? 0).toFixed(2)}
+                  </option>
+                ))}
             </select>
           </div>
 
           <div className="field">
-            <label>Montant à créditer (USD)</label>
+            <label>Montant financier à créditer (USD)</label>
             <input
               type="number"
               step="1"
-              min="1"
+              min="0"
               value={f.amountUsd}
               onChange={e => setF({ ...f, amountUsd: e.target.value })}
-              required
             />
+          </div>
+
+          <div className="grid-2">
+            <div className="field">
+              <label>Pack +SMS</label>
+              <input
+                type="number"
+                min="0"
+                value={f.packSms}
+                onChange={e => setF({ ...f, packSms: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Pack +WhatsApp</label>
+              <input
+                type="number"
+                min="0"
+                value={f.packWhatsapp}
+                onChange={e => setF({ ...f, packWhatsapp: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Pack +RCS</label>
+              <input
+                type="number"
+                min="0"
+                value={f.packRcs}
+                onChange={e => setF({ ...f, packRcs: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Pack +Emails</label>
+              <input
+                type="number"
+                min="0"
+                value={f.packEmail}
+                onChange={e => setF({ ...f, packEmail: e.target.value })}
+              />
+            </div>
           </div>
 
           <div className="field">
@@ -1606,16 +1880,61 @@ function CPanelBilling() {
           <div className="field">
             <label>Note interne</label>
             <input
-              placeholder="Ex. Rechargement mensuel"
+              placeholder="Ex. Pack SMS + crédit mensuel"
               value={f.note}
               onChange={e => setF({ ...f, note: e.target.value })}
             />
           </div>
 
           <button type="submit" className="primary" style={{ width: '100%' }}>
-            Valider le rechargement (+${f.amountUsd} USD)
+            Enregistrer le crédit comptable
           </button>
         </form>
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-header">
+          <div>
+            <h3>Grand livre comptable central ({ledger.length} écritures)</h3>
+            <p>Traçabilité de tous les crédits, attributions de packs et consommations des 4 backends.</p>
+          </div>
+        </div>
+        {ledger.length === 0 ? (
+          <p className="mute">Aucune écriture comptable enregistrée pour le moment.</p>
+        ) : (
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Client</th>
+                  <th>Type</th>
+                  <th>Canal</th>
+                  <th>Quantité</th>
+                  <th>Montant USD</th>
+                  <th>Marge USD</th>
+                  <th>Référence / Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map(e => (
+                  <tr key={e.id}>
+                    <td className="mute" style={{ whiteSpace: 'nowrap' }}>
+                      {new Date(e.created_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                    <td className="cell-main">{e.tenant_name || `Client #${e.tenant_id}`}</td>
+                    <td><span className="badge neutral">{e.entry_type}</span></td>
+                    <td className="mono">{(e.channel || 'all').toUpperCase()}</td>
+                    <td className="mono">{e.quantity > 0 ? `+${e.quantity}` : e.quantity}</td>
+                    <td className="mono">${Number(e.amount_usd || 0).toFixed(4)}</td>
+                    <td className="mono" style={{ color: 'var(--green)' }}>${Number(e.margin_usd || 0).toFixed(4)}</td>
+                    <td className="mute">{e.reference || ''} {e.note || ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </>
   );
@@ -2907,24 +3226,6 @@ export default function App() {
     if (auth) loadUsage();
   }, [auth, loadUsage]);
 
-  const handleOpenClientWorkspace = async tenantId => {
-    try {
-      const res = await api(`/admin/impersonate/${tenantId}`, { method: 'POST' });
-      const clientOrigin =
-        import.meta.env.VITE_CLIENT_URL ||
-        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-          ? 'http://localhost:5173'
-          : window.location.origin);
-      window.open(
-        `${clientOrigin}/#impersonate=${encodeURIComponent(res.token)}`,
-        '_blank',
-        'noopener'
-      );
-    } catch (e) {
-      alert(e.message);
-    }
-  };
-
   if (!auth) {
     return <CPanelLogin onDone={() => setAuth(true)} />;
   }
@@ -3017,9 +3318,7 @@ export default function App() {
 
         <main className="workspace">
           {tab === 'cpanel-dash' && <CPanelDashboard onNavigate={selectTab} />}
-          {tab === 'cpanel-clients' && (
-            <AdminClientsPanel onOpenClientWorkspace={handleOpenClientWorkspace} />
-          )}
+          {tab === 'cpanel-clients' && <AdminClientsPanel />}
           {tab === 'cpanel-billing' && <CPanelBilling />}
           {tab === 'cpanel-routes' && <CPanelRoutes />}
           {tab === 'cpanel-reports' && <ReportsCenter isGlobalCPanel={true} meUsage={meUsage} />}

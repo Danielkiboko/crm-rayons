@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
-import { q, PLAN_PRESETS, generateApiKey, dbEngineType } from './db.js';
+import { q, PLAN_PRESETS, generateApiKey, generateClientId, generateApiSecret, dbEngineType } from './db.js';
 import {
   senders,
   detectTelecomOperator,
@@ -17,6 +17,7 @@ import {
   createRateLimiter,
   auth,
   requireSuperAdmin,
+  requireClientOnly,
   logAudit
 } from './middleware/security.js';
 import {
@@ -30,6 +31,13 @@ import {
   startQueueWorker,
   queueWorkerStats
 } from './services/messagingService.js';
+import { getTenantAccounting, recordAccountingEntry } from './core/accountingService.js';
+import { getCentralChannelsStatus } from './core/channelRegistry.js';
+import { smsRouter } from './channels/sms/sms.routes.js';
+import { whatsappRouter } from './channels/whatsapp/whatsapp.routes.js';
+import { rcsRouter } from './channels/rcs/rcs.routes.js';
+import { emailRouter } from './channels/email/email.routes.js';
+import { adminCentralRouter } from './admin/admin.routes.js';
 import { publicApiV1Router } from './routes/publicApiV1.js';
 
 const app = express();
@@ -46,6 +54,15 @@ const wrap = fn => (req, res) =>
 
 const authLimiter = createRateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'auth' });
 const webhookLimiter = createRateLimiter({ windowMs: 60_000, max: 300, keyPrefix: 'webhook' });
+
+/* ============================================================================
+ * MONTAGE DES 4 BACKENDS CANAUX DÉDIÉS + ADMINISTRATION CENTRALE
+ * ========================================================================== */
+app.use('/api/channels/sms', smsRouter);
+app.use('/api/channels/whatsapp', whatsappRouter);
+app.use('/api/channels/rcs', rcsRouter);
+app.use('/api/channels/email', emailRouter);
+app.use('/api/admin', adminCentralRouter);
 
 /* ============================================================================
  * 1. HEALTHCHECK & ÉTAT SYSTÈME (/api/health)
@@ -245,7 +262,8 @@ app.post('/api/auth/reset-password', authLimiter, wrap(async (req, res) => {
  * ========================================================================== */
 app.get('/api/me/usage', auth, wrap(async (req, res) => {
   const [u] = await q('SELECT id, email, role, tenant_id FROM users WHERE id=$1', [req.user.uid]);
-  const info = await getTenantUsageAndLimits(req.user.tid);
+  const acct = await getTenantAccounting(req.user.tid);
+  const channelsStatus = await getCentralChannelsStatus();
   const creditLogs = await q(
     'SELECT * FROM credit_logs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50',
     [req.user.tid]
@@ -268,13 +286,17 @@ app.get('/api/me/usage', auth, wrap(async (req, res) => {
 
   res.json({
     user: u || { id: req.user.uid, email: req.user.email, role: req.user.role },
-    plan: info.tenant.plan,
-    status: info.tenant.status,
-    senderId: info.tenant.sender_id,
-    apiKey: info.tenant.api_key,
-    company: info.tenant.name,
-    limits: info.limits,
-    usage: info.usage,
+    plan: acct.tenant.plan,
+    status: acct.tenant.status,
+    senderId: acct.tenant.sender_id,
+    clientId: acct.tenant.client_id,
+    apiKey: acct.tenant.api_key,
+    company: acct.tenant.name,
+    limits: acct.limits,
+    usage: acct.usage,
+    quotas: acct.quotas,
+    financial: acct.financial,
+    channelsStatus,
     unreadInboxCount: inboxStats?.unread_count || 0,
     activeAutoRepliesCount: inboxStats?.active_rules || 0,
     creditLogs,
@@ -352,6 +374,7 @@ app.get('/api/admin/clients', auth, requireSuperAdmin, wrap(async (req, res) => 
       t.plan,
       t.status,
       t.sender_id,
+      t.client_id,
       t.api_key,
       t.limits,
       t.created_at,
@@ -364,7 +387,8 @@ app.get('/api/admin/clients', auth, requireSuperAdmin, wrap(async (req, res) => 
       (SELECT count(*)::int FROM messages m WHERE m.tenant_id = t.id AND m.channel='email' AND m.direction='out') AS used_email,
       (SELECT count(*)::int FROM messages m WHERE m.tenant_id = t.id) AS total_tx,
       (SELECT COALESCE(sum(m.cost), 0)::float FROM messages m WHERE m.tenant_id = t.id) AS used_spend,
-      (SELECT COALESCE(sum(m.buy_cost), 0)::float FROM messages m WHERE m.tenant_id = t.id) AS used_buy_cost
+      (SELECT COALESCE(sum(m.buy_cost), 0)::float FROM messages m WHERE m.tenant_id = t.id) AS used_buy_cost,
+      (SELECT COALESCE(sum(cl.amount_usd), 0)::float FROM credit_logs cl WHERE cl.tenant_id = t.id) AS total_credited_usd
     FROM tenants t
     ORDER BY t.id ASC
   `);
@@ -387,36 +411,27 @@ app.get('/api/admin/clients', auth, requireSuperAdmin, wrap(async (req, res) => 
 
   const formatted = rows.map(r => {
     const preset = PLAN_PRESETS[r.plan] || PLAN_PRESETS.business;
+    const lim = { ...preset, ...(r.limits || {}) };
     return {
       ...r,
-      limits: { ...preset, ...(r.limits || {}) }
+      limits: lim,
+      remaining_sms: Math.max(0, Number(lim.maxSms || 0) - Number(r.used_sms || 0)),
+      remaining_whatsapp: Math.max(0, Number(lim.maxWhatsapp || 0) - Number(r.used_whatsapp || 0)),
+      remaining_rcs: Math.max(0, Number(lim.maxRcs || 0) - Number(r.used_rcs || 0)),
+      remaining_email: Math.max(0, Number(lim.maxEmails || 0) - Number(r.used_email || 0)),
+      remaining_spend_usd: Math.max(0, Number((Number(lim.maxSpendUsd || 0) - Number(r.used_spend || 0)).toFixed(4))),
+      net_margin_usd: Number((Number(r.used_spend || 0) - Number(r.used_buy_cost || 0)).toFixed(4))
     };
   });
   res.json({ clients: formatted, presets: PLAN_PRESETS, creditLogs, rechargeRequests });
 }));
 
-app.post('/api/admin/impersonate/:id', auth, requireSuperAdmin, wrap(async (req, res) => {
-  const tid = +req.params.id;
-  const [t] = await q('SELECT * FROM tenants WHERE id=$1', [tid]);
-  if (!t) return res.status(404).json({ error: 'Client introuvable' });
-  const [u] = await q('SELECT * FROM users WHERE tenant_id=$1 ORDER BY id ASC LIMIT 1', [tid]);
-  if (!u) return res.status(404).json({ error: 'Aucun utilisateur rattaché à ce client' });
-
-  await logAudit({
-    tenantId: tid,
-    actorEmail: req.user.email,
-    action: 'ADMIN_IMPERSONATE_CLIENT',
-    details: { targetCompany: t.name, targetEmail: u.email },
-    req
+app.post('/api/admin/impersonate/:id', auth, requireSuperAdmin, (req, res) => {
+  return res.status(403).json({
+    error:
+      'Impersonation désactivée : le C-Panel est strictement réservé à l’administration centrale (comptabilité, quotas restants et credentials).'
   });
-
-  res.json({
-    token: signToken({ id: u.id, tenant_id: t.id, email: u.email, role: 'client' }),
-    email: u.email,
-    role: 'client',
-    company: t.name
-  });
-}));
+});
 
 // Créditer directement un compte client depuis le C-Panel
 app.post('/api/admin/clients/:id/recharge', auth, requireSuperAdmin, wrap(async (req, res) => {
@@ -522,30 +537,62 @@ app.post('/api/admin/clients', auth, requireSuperAdmin, wrap(async (req, res) =>
   const cleanSender =
     (senderId || company).replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 11) || 'RAYONS';
 
+  const clientId = generateClientId();
+  const apiKey = generateApiKey();
+  const plainApiSecret = generateApiSecret();
+  const apiSecretHash = await bcrypt.hash(plainApiSecret, 10);
+
   const [t] = await q(
-    'INSERT INTO tenants(name, plan, status, sender_id, api_key, limits, settings) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-    [company, plan, 'active', cleanSender, generateApiKey(), JSON.stringify(finalLimits), JSON.stringify({})]
+    'INSERT INTO tenants(name, plan, status, sender_id, client_id, api_key, api_secret_hash, limits, settings) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+    [company, plan, 'active', cleanSender, clientId, apiKey, apiSecretHash, JSON.stringify(finalLimits), JSON.stringify({})]
   );
   const [u] = await q(
     'INSERT INTO users(tenant_id, email, password_hash, role) VALUES($1, $2, $3, $4) RETURNING id, email, role',
     [t.id, cleanEmail, await bcrypt.hash(password, 10), 'client']
   );
 
+  const initRef = `INIT-${1000 + t.id}`;
   await q(
     `INSERT INTO credit_logs(tenant_id, amount_usd, payment_method, reference, note)
      VALUES($1, $2, 'Activation C-Panel', $3, $4)`,
-    [t.id, finalLimits.maxSpendUsd || 25, `INIT-${1000 + t.id}`, `Ouverture forfait ${plan}`]
+    [t.id, finalLimits.maxSpendUsd || 25, initRef, `Ouverture forfait ${plan}`]
   );
+
+  await recordAccountingEntry({
+    tenantId: t.id,
+    entryType: 'account_opening',
+    channel: 'all',
+    quantity: Number(finalLimits.maxSms || 0),
+    amountUsd: Number(finalLimits.maxSpendUsd || 0),
+    buyCostUsd: 0,
+    paymentMethod: 'Activation C-Panel',
+    reference: initRef,
+    note: `Création client ${company} (SMS:${finalLimits.maxSms || 0}, WA:${finalLimits.maxWhatsapp || 0}, RCS:${finalLimits.maxRcs || 0}, Email:${finalLimits.maxEmails || 0})`,
+    actorEmail: req.user.email
+  });
 
   await logAudit({
     tenantId: t.id,
     actorEmail: req.user.email,
     action: 'ADMIN_CREATE_CLIENT',
-    details: { company, email: cleanEmail, plan, senderId: cleanSender },
+    details: { company, email: cleanEmail, plan, senderId: cleanSender, clientId },
     req
   });
 
-  res.json({ tenant: t, user: u });
+  res.json({
+    tenant: t,
+    user: u,
+    credentials: {
+      company,
+      loginEmail: cleanEmail,
+      password,
+      clientId,
+      apiKey,
+      apiSecret: plainApiSecret,
+      senderId: cleanSender,
+      allowedChannels: finalLimits.allowedChannels || ['sms', 'whatsapp', 'rcs', 'email']
+    }
+  });
 }));
 
 app.put('/api/admin/clients/:id', auth, requireSuperAdmin, wrap(async (req, res) => {
@@ -1207,7 +1254,7 @@ app.delete('/api/campaigns/:id', auth, wrap(async (req, res) => {
 }));
 
 // Moteur d'Envoi en Masse (SMS, Emailing, RCS Rich Card, WhatsApp)
-app.post('/api/campaigns/launch', auth, wrap(async (req, res) => {
+app.post('/api/campaigns/launch', auth, requireClientOnly, wrap(async (req, res) => {
   const {
     name = '',
     channel = 'sms',
@@ -1440,7 +1487,7 @@ app.post('/api/campaigns/launch', auth, wrap(async (req, res) => {
 /* ============================================================================
  * 6. ENVOI DE MESSAGES, CAMPAGNES PROGRAMMÉES & RELANCE (/api/messages/*)
  * ========================================================================== */
-app.post('/api/messages/send', auth, wrap(async (req, res) => {
+app.post('/api/messages/send', auth, requireClientOnly, wrap(async (req, res) => {
   const {
     channel,
     contactIds = [],
@@ -1559,7 +1606,7 @@ app.post('/api/messages/send', auth, wrap(async (req, res) => {
 }));
 
 // Relancer manuellement une transaction en échec (Retry)
-app.post('/api/messages/:id/retry', auth, wrap(async (req, res) => {
+app.post('/api/messages/:id/retry', auth, requireClientOnly, wrap(async (req, res) => {
   const msgId = +req.params.id;
   const [m] = await q('SELECT * FROM messages WHERE id=$1 AND tenant_id=$2', [msgId, req.user.tid]);
   if (!m) return res.status(404).json({ error: 'Transaction introuvable' });
@@ -1684,7 +1731,7 @@ app.get('/api/inbox/threads/:contactId', auth, wrap(async (req, res) => {
   });
 }));
 
-app.post('/api/inbox/threads/:contactId/reply', auth, wrap(async (req, res) => {
+app.post('/api/inbox/threads/:contactId/reply', auth, requireClientOnly, wrap(async (req, res) => {
   const tid = req.user.tid;
   const cid = +req.params.contactId;
   const { channel = 'sms', subject = '', body = '', metadata = {} } = req.body;

@@ -532,6 +532,511 @@ function ClientLogin({ onDone }) {
  * PARTIE 2 : COMPOSANTS DE L'ESPACE CLIENT (APPLICATION CRM CLIENT)
  * ========================================================================== */
 
+const CHANNEL_META = {
+  whatsapp: {
+    key: 'whatsapp',
+    label: 'WhatsApp',
+    subtitle: 'Backend WhatsApp Business',
+    endpoint: '/api/channels/whatsapp',
+    color: 'var(--green)',
+    soft: 'var(--green-soft)',
+    placeholderTo: '+243 81 000 0000'
+  },
+  email: {
+    key: 'email',
+    label: 'Email',
+    subtitle: 'Backend Email Direct SMTP',
+    endpoint: '/api/channels/email',
+    color: 'var(--purple)',
+    soft: 'var(--purple-soft)',
+    placeholderTo: 'client@entreprise.cd'
+  },
+  sms: {
+    key: 'sms',
+    label: 'SMS',
+    subtitle: 'Backend SMS Télécom Direct',
+    endpoint: '/api/channels/sms',
+    color: 'var(--blue)',
+    soft: 'var(--blue-soft)',
+    placeholderTo: '+243 81 000 0000'
+  },
+  rcs: {
+    key: 'rcs',
+    label: 'RCS',
+    subtitle: 'Backend RCS Riche (+ Fallback SMS)',
+    endpoint: '/api/channels/rcs',
+    color: 'var(--amber)',
+    soft: 'var(--amber-soft)',
+    placeholderTo: '+243 81 000 0000'
+  }
+};
+
+function ChannelWorkspace({ channel, meUsage, onRefreshUsage, onNavigate }) {
+  const meta = CHANNEL_META[channel] || CHANNEL_META.sms;
+  const [data, setData] = useState(null);
+  const [contacts, setContacts] = useState([]);
+  const [mode, setMode] = useState('single'); // 'single' | 'campaign'
+  const [to, setTo] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [manualBulk, setManualBulk] = useState('');
+  const [campaignName, setCampaignName] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [cardTitle, setCardTitle] = useState('');
+  const [ctaLabel, setCtaLabel] = useState('');
+  const [ctaUrl, setCtaUrl] = useState('');
+  const [smsFallback, setSmsFallback] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [okMsg, setOkMsg] = useState('');
+  const [errMsg, setErrMsg] = useState('');
+
+  const load = useCallback(() => {
+    api(`/channels/${channel}/overview`).then(setData).catch(e => setErrMsg(e.message));
+    api('/contacts').then(rows => setContacts(Array.isArray(rows) ? rows : [])).catch(() => {});
+  }, [channel]);
+
+  useEffect(() => {
+    setOkMsg('');
+    setErrMsg('');
+    load();
+  }, [load]);
+
+  const compatibleContacts = contacts.filter(c => (channel === 'email' ? Boolean(c.email) : Boolean(c.phone)));
+
+  const toggleSelectContact = id => {
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
+
+  const applyTemplate = tpl => {
+    if (!tpl) return;
+    setSubject(tpl.subject || '');
+    setBody(tpl.body || '');
+    if (tpl.metadata?.cardTitle) setCardTitle(tpl.metadata.cardTitle);
+    if (tpl.metadata?.ctaLabel) setCtaLabel(tpl.metadata.ctaLabel);
+    if (tpl.metadata?.ctaUrl) setCtaUrl(tpl.metadata.ctaUrl);
+  };
+
+  const handleSendSingle = async e => {
+    e.preventDefault();
+    setSending(true);
+    setOkMsg('');
+    setErrMsg('');
+    try {
+      const res = await api(`/channels/${channel}/send`, {
+        method: 'POST',
+        body: {
+          to: to.trim(),
+          recipientName: recipientName.trim() || to.trim(),
+          subject,
+          body,
+          metadata:
+            channel === 'rcs' || channel === 'email'
+              ? { cardTitle, ctaLabel, ctaUrl, smsFallback }
+              : {}
+        }
+      });
+      setOkMsg(
+        `Message ${meta.label} envoyé (Réf. ${res.txRef || 'OK'})${
+          res.fallbackUsed ? ' via fallback SMS' : ''
+        }. Restant : ${res.remainingQuota?.remaining ?? '—'}.`
+      );
+      setTo('');
+      setRecipientName('');
+      setBody('');
+      load();
+      onRefreshUsage?.();
+    } catch (e2) {
+      setErrMsg(e2.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleLaunchCampaign = async e => {
+    e.preventDefault();
+    setSending(true);
+    setOkMsg('');
+    setErrMsg('');
+    try {
+      const manualRecipients = manualBulk
+        .split(/[\n,;]+/)
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(addr => ({ to: addr, name: addr }));
+
+      const res = await api(`/channels/${channel}/campaign`, {
+        method: 'POST',
+        body: {
+          name: campaignName.trim() || undefined,
+          contactIds: selectedIds,
+          manualRecipients,
+          subject,
+          body,
+          metadata:
+            channel === 'rcs' || channel === 'email'
+              ? { cardTitle, ctaLabel, ctaUrl, smsFallback }
+              : {}
+        }
+      });
+      setOkMsg(
+        `Campagne ${meta.label} exécutée : ${res.succeeded}/${res.total} envoyé(s). Restant : ${
+          res.remainingQuota?.remaining ?? '—'
+        }.`
+      );
+      setCampaignName('');
+      setManualBulk('');
+      setSelectedIds([]);
+      setBody('');
+      load();
+      onRefreshUsage?.();
+    } catch (e2) {
+      setErrMsg(e2.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!data) return <div className="card mute">Connexion au backend {meta.label} ({meta.endpoint})…</div>;
+
+  const qInfo = data.quota || { max: 0, used: 0, remaining: 0 };
+  const st = data.stats || { total_sent: 0, delivered: 0, failed: 0, inbound: 0, total_cost: 0 };
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+            <h2>{meta.label}</h2>
+            <span className={`badge ${channel}`}>{meta.endpoint}</span>
+            <span className={`status-pill ${data.active ? 'active' : 'suspended'}`}>
+              <span className="status-dot" />
+              {data.active ? 'Backend actif' : 'Désactivé par le C-Panel'}
+            </span>
+          </div>
+          <p>
+            {meta.subtitle} • Sender ID : {data.senderId || meUsage?.senderId || 'RAYONS'} • Interconnecté à l'administration centrale.
+          </p>
+        </div>
+        <div className="row">
+          <button onClick={load}>Actualiser</button>
+          <button onClick={() => onNavigate('client-dash')}>Retour aux 4 canaux</button>
+        </div>
+      </div>
+
+      {!data.active && (
+        <div className="notice err" style={{ marginBottom: 16 }}>
+          {!data.enabledGlobal
+            ? `Le backend ${meta.label} est temporairement coupé par l'administration centrale.${
+                data.maintenanceNote ? ` (${data.maintenanceNote})` : ''
+              }`
+            : `Le canal ${meta.label} n'est pas activé sur votre compte client. Contactez l'administrateur C-Panel.`}
+        </div>
+      )}
+
+      {okMsg && <div className="notice ok" style={{ marginBottom: 16 }}>{okMsg}</div>}
+      {errMsg && <div className="notice err" style={{ marginBottom: 16 }}>{errMsg}</div>}
+
+      <div className="metrics-grid">
+        <div className="metric-card">
+          <div className="metric-label"><span>{meta.label} restants</span></div>
+          <div className="metric-value" style={{ color: meta.color }}>
+            {qInfo.remaining.toLocaleString('fr-FR')}
+          </div>
+          <div className="metric-foot">
+            <span>Alloués : {qInfo.max.toLocaleString('fr-FR')}</span>
+            <span>Utilisés : {qInfo.used.toLocaleString('fr-FR')}</span>
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label"><span>Envoyés ({meta.label})</span></div>
+          <div className="metric-value">{st.total_sent}</div>
+          <div className="metric-foot">
+            <span>Livrés : {st.delivered}</span>
+            <span className={st.failed > 0 ? 'err-text' : ''}>Échecs : {st.failed}</span>
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label"><span>Réponses reçues</span></div>
+          <div className="metric-value">{st.inbound}</div>
+          <div className="metric-foot">
+            <button className="sm ghost" onClick={() => onNavigate('client-inbox')}>
+              Boîte 2-Way
+            </button>
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label"><span>Solde USD restant</span></div>
+          <div className="metric-value">${Number(data.financial?.remainingSpendUsd ?? 0).toFixed(2)}</div>
+          <div className="metric-foot">
+            <span>Coût canal : ${Number(st.total_cost || 0).toFixed(3)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="split-view">
+        <div className="card" style={{ marginBottom: 0 }}>
+          <div className="card-header">
+            <div>
+              <h3>Console d'envoi {meta.label}</h3>
+              <p>Connectée directement au backend {meta.endpoint}.</p>
+            </div>
+            <div className="segmented" style={{ margin: 0, width: 240 }}>
+              <button
+                type="button"
+                className={mode === 'single' ? 'active' : ''}
+                onClick={() => setMode('single')}
+              >
+                Unitaire
+              </button>
+              <button
+                type="button"
+                className={mode === 'campaign' ? 'active' : ''}
+                onClick={() => setMode('campaign')}
+              >
+                Campagne
+              </button>
+            </div>
+          </div>
+
+          {(data.templates || []).length > 0 && (
+            <div className="field">
+              <label>Charger un modèle {meta.label}</label>
+              <select
+                defaultValue=""
+                onChange={e => {
+                  const found = (data.templates || []).find(t => String(t.id) === e.target.value);
+                  if (found) applyTemplate(found);
+                }}
+              >
+                <option value="">— Sélectionner un modèle —</option>
+                {data.templates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {mode === 'single' ? (
+            <form onSubmit={handleSendSingle}>
+              <div className="grid-2">
+                <div className="field">
+                  <label>{channel === 'email' ? 'Email destinataire' : 'Numéro destinataire'}</label>
+                  <input
+                    type={channel === 'email' ? 'email' : 'tel'}
+                    placeholder={meta.placeholderTo}
+                    value={to}
+                    onChange={e => setTo(e.target.value)}
+                    disabled={!data.active}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label>Nom du contact (optionnel)</label>
+                  <input
+                    placeholder="Nom du destinataire"
+                    value={recipientName}
+                    onChange={e => setRecipientName(e.target.value)}
+                    disabled={!data.active}
+                  />
+                </div>
+              </div>
+
+              {(channel === 'email' || channel === 'rcs') && (
+                <div className="field">
+                  <label>{channel === 'email' ? 'Objet de l’email' : 'Titre de la carte RCS'}</label>
+                  <input
+                    placeholder={channel === 'email' ? 'Objet du message' : 'Titre de la carte riche'}
+                    value={channel === 'email' ? subject : cardTitle}
+                    onChange={e => (channel === 'email' ? setSubject(e.target.value) : setCardTitle(e.target.value))}
+                    disabled={!data.active}
+                  />
+                </div>
+              )}
+
+              <div className="field">
+                <label>Message {meta.label}</label>
+                <textarea
+                  rows={5}
+                  placeholder={`Rédigez votre message ${meta.label} (variables : {{name}}, {{company}})…`}
+                  value={body}
+                  onChange={e => setBody(e.target.value)}
+                  disabled={!data.active}
+                  required
+                />
+              </div>
+
+              {(channel === 'rcs' || channel === 'email') && (
+                <div className="grid-2">
+                  <div className="field">
+                    <label>Bouton CTA (optionnel)</label>
+                    <input
+                      placeholder="Ex. Voir l'offre"
+                      value={ctaLabel}
+                      onChange={e => setCtaLabel(e.target.value)}
+                      disabled={!data.active}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Lien CTA (optionnel)</label>
+                    <input
+                      placeholder="https://…"
+                      value={ctaUrl}
+                      onChange={e => setCtaUrl(e.target.value)}
+                      disabled={!data.active}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {channel === 'rcs' && (
+                <label className="row" style={{ gap: 8, marginBottom: 14, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 'auto' }}
+                    checked={smsFallback}
+                    onChange={e => setSmsFallback(e.target.checked)}
+                    disabled={!data.active}
+                  />
+                  <span>Bascule automatique vers le backend SMS si RCS indisponible</span>
+                </label>
+              )}
+
+              <button type="submit" className="primary" disabled={!data.active || sending || qInfo.remaining <= 0}>
+                {sending ? 'Envoi en cours…' : `Envoyer par ${meta.label}`}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleLaunchCampaign}>
+              <div className="field">
+                <label>Nom de la campagne {meta.label}</label>
+                <input
+                  placeholder={`Ex. Campagne ${meta.label} du mois`}
+                  value={campaignName}
+                  onChange={e => setCampaignName(e.target.value)}
+                  disabled={!data.active}
+                />
+              </div>
+
+              {compatibleContacts.length > 0 && (
+                <div className="field">
+                  <label>
+                    Contacts enregistrés ({selectedIds.length} sélectionné(s) / {compatibleContacts.length})
+                  </label>
+                  <div className="contact-pick-list">
+                    {compatibleContacts.slice(0, 60).map(c => (
+                      <label key={c.id} className="contact-pick-item">
+                        <input
+                          type="checkbox"
+                          style={{ width: 'auto' }}
+                          checked={selectedIds.includes(c.id)}
+                          onChange={() => toggleSelectContact(c.id)}
+                          disabled={!data.active}
+                        />
+                        <span>{c.name}</span>
+                        <span className="mono mute">{channel === 'email' ? c.email : c.phone}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="field">
+                <label>Ou collez des destinataires (un par ligne)</label>
+                <textarea
+                  rows={3}
+                  placeholder={channel === 'email' ? 'client1@domaine.cd\nclient2@domaine.cd' : '+243810000001\n+243990000002'}
+                  value={manualBulk}
+                  onChange={e => setManualBulk(e.target.value)}
+                  disabled={!data.active}
+                />
+              </div>
+
+              {(channel === 'email' || channel === 'rcs') && (
+                <div className="field">
+                  <label>{channel === 'email' ? 'Objet de la campagne' : 'Titre carte RCS'}</label>
+                  <input
+                    value={channel === 'email' ? subject : cardTitle}
+                    onChange={e => (channel === 'email' ? setSubject(e.target.value) : setCardTitle(e.target.value))}
+                    disabled={!data.active}
+                  />
+                </div>
+              )}
+
+              <div className="field">
+                <label>Message de la campagne</label>
+                <textarea
+                  rows={4}
+                  placeholder={`Message ${meta.label} pour tous les destinataires…`}
+                  value={body}
+                  onChange={e => setBody(e.target.value)}
+                  disabled={!data.active}
+                  required
+                />
+              </div>
+
+              <button type="submit" className="primary" disabled={!data.active || sending || qInfo.remaining <= 0}>
+                {sending ? 'Diffusion en cours…' : `Lancer la campagne ${meta.label}`}
+              </button>
+            </form>
+          )}
+        </div>
+
+        <div className="card" style={{ marginBottom: 0 }}>
+          <div className="card-header">
+            <div>
+              <h3>Dernières activités {meta.label}</h3>
+              <p>Historique direct de ce backend canal.</p>
+            </div>
+          </div>
+
+          {channel === 'sms' && (data.byOperator || []).length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                {data.byOperator.map(op => (
+                  <span key={op.operator} className="badge neutral">
+                    {op.operator} : {op.total} ({op.delivered} livrés)
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(data.recentMessages || []).length === 0 ? (
+            <p className="mute">Aucun message {meta.label} envoyé pour le moment.</p>
+          ) : (
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Destinataire</th>
+                    <th>Référence</th>
+                    <th>Statut</th>
+                    <th>Coût</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.recentMessages.slice(0, 12).map(m => (
+                    <tr key={m.id}>
+                      <td>
+                        <div className="cell-main">{m.contact_name || m.addr}</div>
+                        <div className="cell-sub">{(m.body || '').slice(0, 50)}</div>
+                      </td>
+                      <td className="mono">{m.tx_ref || '—'}</td>
+                      <td><StatusIndicator status={m.status} /></td>
+                      <td className="mono">${Number(m.cost || 0).toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ClientDashboard({ onNavigate, meUsage }) {
   const [s, setS] = useState(null);
   const [recent, setRecent] = useState([]);
@@ -548,6 +1053,14 @@ function ClientDashboard({ onNavigate, meUsage }) {
     totals.total_tx > 0 ? Math.round((totals.success_tx / totals.total_tx) * 100) : 100;
   const lim = meUsage?.limits || {};
   const u = meUsage?.usage || {};
+  const quotas = meUsage?.quotas || {
+    sms: { max: lim.maxSms || 0, used: u.sms || 0, remaining: Math.max(0, (lim.maxSms || 0) - (u.sms || 0)) },
+    whatsapp: { max: lim.maxWhatsapp || 0, used: u.whatsapp || 0, remaining: Math.max(0, (lim.maxWhatsapp || 0) - (u.whatsapp || 0)) },
+    rcs: { max: lim.maxRcs || 0, used: u.rcs || 0, remaining: Math.max(0, (lim.maxRcs || 0) - (u.rcs || 0)) },
+    email: { max: lim.maxEmails || 0, used: u.email || 0, remaining: Math.max(0, (lim.maxEmails || 0) - (u.email || 0)) }
+  };
+  const allowedChannels = lim.allowedChannels || ['sms', 'whatsapp', 'rcs', 'email'];
+  const globalMap = Object.fromEntries((meUsage?.channelsStatus || []).map(c => [c.channel, c]));
 
   return (
     <>
@@ -555,14 +1068,65 @@ function ClientDashboard({ onNavigate, meUsage }) {
         <div>
           <h2>Espace Client — {meUsage?.company || 'Mon Entreprise'}</h2>
           <p>
-            Forfait {meUsage?.plan || 'Standard'} • Sender ID Télécom : {meUsage?.senderId || 'RAYONS'} • Email direct : {meUsage?.user?.email || ''}
+            Forfait {meUsage?.plan || 'Standard'} • Sender ID : {meUsage?.senderId || 'RAYONS'} • Solde USD restant : $
+            {Number(meUsage?.financial?.remainingSpendUsd ?? Math.max(0, (lim.maxSpendUsd || 0) - (u.spendUsd || 0))).toFixed(2)}
           </p>
         </div>
         <div className="row">
-          <button onClick={() => onNavigate('client-templates')}>Modèles de messages</button>
-          <button className="primary" onClick={() => onNavigate('client-contacts')}>
-            Nouvelle campagne
-          </button>
+          <button onClick={() => onNavigate('client-contacts')}>Contacts</button>
+          <button onClick={() => onNavigate('client-account')}>Mon compte & API</button>
+        </div>
+      </div>
+
+      {/* 4 BOUTONS DÉDIÉS : WHATSAPP, EMAIL, SMS, RCS — CHACUN CONNECTÉ À SON BACKEND */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h3>Vos 4 Canaux de Communication</h3>
+            <p>Cliquez sur un canal pour ouvrir son espace dédié et envoyer vos messages ou campagnes.</p>
+          </div>
+          <span className="badge neutral" style={{ textTransform: 'capitalize' }}>
+            Forfait {meUsage?.plan || 'Standard'}
+          </span>
+        </div>
+
+        <div className="channel-grid-4">
+          {['whatsapp', 'email', 'sms', 'rcs'].map(chKey => {
+            const meta = CHANNEL_META[chKey];
+            const q = quotas[chKey] || { max: 0, used: 0, remaining: 0 };
+            const globalOn = globalMap[chKey]?.enabled !== false;
+            const clientOn = allowedChannels.includes(chKey);
+            const active = globalOn && clientOn && meUsage?.status !== 'suspended';
+
+            return (
+              <button
+                key={chKey}
+                type="button"
+                className={`channel-launch-btn ${active ? '' : 'is-disabled'}`}
+                onClick={() => onNavigate(`channel-${chKey}`)}
+              >
+                <div className="row" style={{ justifyContent: 'space-between', width: '100%' }}>
+                  <span className={`badge ${chKey}`}>{meta.label}</span>
+                  <span className={`status-pill ${active ? 'active' : 'suspended'}`}>
+                    <span className="status-dot" />
+                    {active ? 'Actif' : 'Verrouillé'}
+                  </span>
+                </div>
+                <div style={{ textAlign: 'left', margin: '14px 0 8px' }}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: meta.color }} className="tabular">
+                    {q.remaining.toLocaleString('fr-FR')}
+                  </div>
+                  <div className="mute" style={{ fontSize: 12.5 }}>
+                    {meta.label} restants sur {q.max.toLocaleString('fr-FR')}
+                  </div>
+                </div>
+                <div className="channel-launch-foot">
+                  <span>Ouvrir {meta.label}</span>
+                  <span>→</span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -571,21 +1135,18 @@ function ClientDashboard({ onNavigate, meUsage }) {
         <div className="card">
           <div className="card-header">
             <div>
-              <h3>Mon forfait et mes limites d'utilisation</h3>
+              <h3>Suivi des quotas et comptabilité</h3>
               <p>
-                Consommation en temps réel par rapport aux plafonds définis pour votre compte client.
+                Consommation synchronisée en temps réel avec l'administration centrale Rayons.
               </p>
             </div>
-            <span className="badge neutral" style={{ textTransform: 'capitalize' }}>
-              Forfait {meUsage.plan}
-            </span>
           </div>
           <div className="grid-3">
             <QuotaItem label="Contacts enregistrés" used={u.contacts} max={lim.maxContacts} />
-            <QuotaItem label="SMS Télécom (mois)" used={u.sms} max={lim.maxSms} color="var(--blue)" />
-            <QuotaItem label="WhatsApp (mois)" used={u.whatsapp} max={lim.maxWhatsapp} color="var(--green)" />
-            <QuotaItem label="RCS Opérateur (mois)" used={u.rcs} max={lim.maxRcs} color="var(--amber)" />
-            <QuotaItem label="Emails directs (mois)" used={u.email} max={lim.maxEmails} color="var(--purple)" />
+            <QuotaItem label="SMS Télécom" used={u.sms} max={lim.maxSms} color="var(--blue)" />
+            <QuotaItem label="WhatsApp" used={u.whatsapp} max={lim.maxWhatsapp} color="var(--green)" />
+            <QuotaItem label="RCS Opérateur" used={u.rcs} max={lim.maxRcs} color="var(--amber)" />
+            <QuotaItem label="Emails directs" used={u.email} max={lim.maxEmails} color="var(--purple)" />
             <QuotaItem label="Budget Télécom USD" used={u.spendUsd} max={lim.maxSpendUsd} unit="$" color="var(--amber)" />
           </div>
         </div>
@@ -6265,8 +6826,13 @@ export default function App() {
   const userEmail = meUsage?.user?.email || localStorage.client_email || '';
   const tenantName = meUsage?.company || 'Rayons CRM';
 
+  const qMap = meUsage?.quotas || {};
   const navItems = [
     { key: 'client-dash', label: 'Tableau de bord', short: 'Accueil', icon: 'dash' },
+    { key: 'channel-whatsapp', label: 'WhatsApp', short: 'WhatsApp', icon: 'mass', count: qMap.whatsapp?.remaining },
+    { key: 'channel-email', label: 'Email', short: 'Email', icon: 'templates', count: qMap.email?.remaining },
+    { key: 'channel-sms', label: 'SMS', short: 'SMS', icon: 'routes', count: qMap.sms?.remaining },
+    { key: 'channel-rcs', label: 'RCS', short: 'RCS', icon: 'mass', count: qMap.rcs?.remaining },
     {
       key: 'client-inbox',
       label: 'Boîte de réception 2-Way',
@@ -6274,12 +6840,11 @@ export default function App() {
       icon: 'inbox',
       badge: meUsage?.unreadInboxCount || 0
     },
-    { key: 'client-contacts', label: 'Contacts et envois', short: 'Contacts', icon: 'contacts' },
-    { key: 'client-mass', label: 'Envoi en masse et RCS', short: 'Masse/RCS', icon: 'mass' },
-    { key: 'client-templates', label: 'Modèles de messages', short: 'Modèles', icon: 'templates' },
+    { key: 'client-contacts', label: 'Contacts', short: 'Contacts', icon: 'contacts' },
+    { key: 'client-templates', label: 'Modèles', short: 'Modèles', icon: 'templates' },
     { key: 'client-reports', label: 'Rapports et bilan', short: 'Rapports', icon: 'reports' },
     { key: 'client-tx', label: 'Mes transactions', short: 'Journal', icon: 'transactions' },
-    { key: 'client-account', label: 'Mon email et clé API', short: 'Compte', icon: 'settings' }
+    { key: 'client-account', label: 'Mon compte & API', short: 'Compte', icon: 'settings' }
   ];
 
   const selectTab = key => {
@@ -6333,6 +6898,11 @@ export default function App() {
                     <span>{item.label}</span>
                   </span>
                   {item.badge > 0 && <span className="unread-pill">{item.badge}</span>}
+                  {typeof item.count === 'number' && (
+                    <span className="mono mute" style={{ fontSize: 11 }}>
+                      {item.count.toLocaleString('fr-FR')}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>
@@ -6365,6 +6935,18 @@ export default function App() {
 
         <main className="workspace">
           {tab === 'client-dash' && <ClientDashboard onNavigate={selectTab} meUsage={meUsage} />}
+          {tab === 'channel-whatsapp' && (
+            <ChannelWorkspace channel="whatsapp" meUsage={meUsage} onRefreshUsage={loadUsage} onNavigate={selectTab} />
+          )}
+          {tab === 'channel-email' && (
+            <ChannelWorkspace channel="email" meUsage={meUsage} onRefreshUsage={loadUsage} onNavigate={selectTab} />
+          )}
+          {tab === 'channel-sms' && (
+            <ChannelWorkspace channel="sms" meUsage={meUsage} onRefreshUsage={loadUsage} onNavigate={selectTab} />
+          )}
+          {tab === 'channel-rcs' && (
+            <ChannelWorkspace channel="rcs" meUsage={meUsage} onRefreshUsage={loadUsage} onNavigate={selectTab} />
+          )}
           {tab === 'client-inbox' && (
             <UnifiedInboxAndAutoResponder
               userEmail={userEmail}

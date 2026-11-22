@@ -3,8 +3,11 @@ CREATE TABLE IF NOT EXISTS tenants (
   plan TEXT NOT NULL DEFAULT 'business',
   status TEXT NOT NULL DEFAULT 'active',
   sender_id TEXT NOT NULL DEFAULT 'RAYONS',
+  client_id TEXT UNIQUE,
   api_key TEXT UNIQUE,
+  api_secret_hash TEXT,
   limits JSONB NOT NULL DEFAULT '{}',
+  channel_flags JSONB NOT NULL DEFAULT '{}',
   settings JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -142,3 +145,19 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_password_resets_email ON password_resets(email, created_at);
+CREATE TABLE IF NOT EXISTS accounting_entries (
+  id SERIAL PRIMARY KEY,
+  tenant_id INT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  entry_type TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'all',
+  quantity INT NOT NULL DEFAULT 0,
+  amount_usd NUMERIC(10,4) NOT NULL DEFAULT 0,
+  buy_cost_usd NUMERIC(10,4) NOT NULL DEFAULT 0,
+  margin_usd NUMERIC(10,4) NOT NULL DEFAULT 0,
+  payment_method TEXT,
+  reference TEXT,
+  note TEXT,
+  actor_email TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_accounting_tenant_created ON accounting_entries(tenant_id, created_at);

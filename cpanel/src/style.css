@@ -1706,3 +1706,48 @@ tbody tr:last-child td {
   min-height: 44px;
   text-align: center;
 }
+
+.channel-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 1100px) {
+  .channel-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .channel-grid-4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.channel-ctrl-card {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.channel-ctrl-card.is-off {
+  opacity: 0.72;
+  background: var(--bg-subtle);
+}
+
+.cred-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 12.5px;
+  word-break: break-all;
+}

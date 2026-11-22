@@ -112,6 +112,21 @@ export async function requireSuperAdmin(req, res, next) {
 }
 
 /**
+ * Garde d'isolation stricte : empêche tout compte C-Panel (superadmin) d'envoyer des campagnes ou messages
+ */
+export async function requireClientOnly(req, res, next) {
+  const [u] = await q('SELECT role FROM users WHERE id=$1', [req.user.uid]);
+  const role = u?.role || req.user.role;
+  if (role === 'superadmin') {
+    return res.status(403).json({
+      error:
+        'Action interdite depuis le C-Panel : l’administration centrale gère uniquement la comptabilité, les quotas et les credentials clients.'
+    });
+  }
+  next();
+}
+
+/**
  * Authentification par Clé API Cliente (X-API-Key: ray_live_...) pour l'API publique /api/v1/*
  */
 export async function apiKeyAuth(req, res, next) {

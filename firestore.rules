@@ -19,7 +19,8 @@ rules_version = '2';
 // Assumed Data Model (Managed Exclusively by Backend Admin SDK)
 // -----------------------------------------------------------------------------
 // - tenants/{tenantId}              : Tenant config, plan, status, sender_id,
-//                                     api_key (secret), limits, settings
+//                                     client_id, api_key (secret),
+//                                     api_secret_hash (secret), limits, settings
 // - users/{userId}                  : tenant_id, email (PII), password_hash
 //                                     (secret), role, created_at
 // - contacts/{contactId}            : tenant_id, name, phone, email (PII),
@@ -44,6 +45,10 @@ rules_version = '2';
 //                                     details, ip_addr (PII), created_at
 // - password_resets/{resetId}       : user_id, email (PII), code_hash (secret),
 //                                     expires_at, used_at, created_at
+// - accounting_entries/{entryId}    : tenant_id, entry_type, channel, quantity,
+//                                     amount_usd, buy_cost_usd, margin_usd,
+//                                     payment_method, reference, note,
+//                                     actor_email (PII), created_at
 // - _rayons_meta/{metaId}           : Internal backend/migration metadata
 //
 // IMPORTANT:
@@ -104,6 +109,10 @@ service cloud.firestore {
     }
 
     match /password_resets/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /accounting_entries/{docId=**} {
       allow read, write: if false;
     }
 
