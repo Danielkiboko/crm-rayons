@@ -217,8 +217,6 @@ function QuotaItem({ label, used = 0, max = 1, unit = '', color = 'var(--primary
  * CONNEXION ESPACE CLIENT (UNIQUEMENT LE FORMULAIRE DE CONNEXION)
  * ========================================================================== */
 function ClientLogin({ onDone }) {
-  const [mode, setMode] = useState('login');
-  const [company, setCompany] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -230,11 +228,10 @@ function ClientLogin({ onDone }) {
     setErr('');
     setLoading(true);
     try {
-      const payload =
-        mode === 'register'
-          ? { company: company.trim(), email: email.trim(), password }
-          : { email: email.trim(), password };
-      const r = await api(`/auth/${mode}`, { method: 'POST', body: payload });
+      const r = await api('/auth/login', {
+        method: 'POST',
+        body: { email: email.trim(), password }
+      });
       localStorage.client_token = r.token;
       localStorage.client_email = r.email || email.trim();
       onDone();
@@ -253,47 +250,7 @@ function ClientLogin({ onDone }) {
           <span>Rayons CRM</span>
         </div>
 
-        <div className="segmented" style={{ marginTop: 18, marginBottom: 18 }}>
-          <button
-            type="button"
-            className={mode === 'login' ? 'active' : ''}
-            onClick={() => {
-              setMode('login');
-              setErr('');
-            }}
-          >
-            Connexion
-          </button>
-          <button
-            type="button"
-            className={mode === 'register' ? 'active' : ''}
-            onClick={() => {
-              setMode('register');
-              setErr('');
-            }}
-          >
-            Créer un compte
-          </button>
-        </div>
-
-        <form onSubmit={submit}>
-          {mode === 'register' && (
-            <div className="field">
-              <label htmlFor="client-company">Nom de l'entreprise</label>
-              <input
-                id="client-company"
-                name="organization"
-                type="text"
-                autoComplete="organization"
-                enterKeyHint="next"
-                placeholder="Nom de votre entreprise"
-                value={company}
-                onChange={e => setCompany(e.target.value)}
-                required
-              />
-            </div>
-          )}
-
+        <form onSubmit={submit} style={{ marginTop: 22 }}>
           <div className="field">
             <label htmlFor="client-email">Adresse email</label>
             <input
@@ -317,10 +274,9 @@ function ClientLogin({ onDone }) {
                 id="client-password"
                 name="password"
                 type={showPwd ? 'text' : 'password'}
-                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-                minLength={8}
+                autoComplete="current-password"
                 enterKeyHint="done"
-                placeholder="8 caractères minimum"
+                placeholder="Mot de passe"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
@@ -343,11 +299,7 @@ function ClientLogin({ onDone }) {
           )}
 
           <button type="submit" className="primary" style={{ width: '100%' }} disabled={loading}>
-            {loading
-              ? 'Authentification…'
-              : mode === 'login'
-              ? 'Se connecter'
-              : 'Créer mon compte'}
+            {loading ? 'Connexion…' : 'Se connecter'}
           </button>
         </form>
       </div>

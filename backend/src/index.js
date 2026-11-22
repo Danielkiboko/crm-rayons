@@ -85,37 +85,11 @@ app.get('/api/health', wrap(async (req, res) => {
 /* ============================================================================
  * 2. AUTHENTIFICATION (/api/auth/*)
  * ========================================================================== */
-app.post('/api/auth/register', authLimiter, wrap(async (req, res) => {
-  const { company, email, password } = req.body;
-  if (!company || !email || (password || '').length < 8) {
-    return res.status(400).json({ error: 'Champs invalides (mot de passe : 8+ caractères)' });
-  }
-  const cleanEmail = email.trim().toLowerCase();
-  const exists = await q('SELECT id FROM users WHERE email=$1', [cleanEmail]);
-  if (exists.length > 0) {
-    return res.status(400).json({ error: 'Cette adresse email est déjà enregistrée' });
-  }
-
-  const senderId = company.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 11) || 'RAYONS';
-  const [t] = await q(
-    'INSERT INTO tenants(name, plan, status, sender_id, api_key, limits) VALUES($1, $2, $3, $4, $5, $6) RETURNING id',
-    [company, 'starter', 'active', senderId, generateApiKey(), JSON.stringify(PLAN_PRESETS.starter)]
-  );
-  const [u] = await q(
-    'INSERT INTO users(tenant_id,email,password_hash,role) VALUES($1,$2,$3,$4) RETURNING *',
-    [t.id, cleanEmail, await bcrypt.hash(password, 10), 'client']
-  );
-
-  await logAudit({
-    tenantId: t.id,
-    actorEmail: cleanEmail,
-    action: 'CLIENT_REGISTER',
-    details: { company, plan: 'starter', senderId },
-    req
+app.post('/api/auth/register', authLimiter, (req, res) => {
+  return res.status(403).json({
+    error: 'Inscription publique désactivée. Seul un administrateur C-Panel peut créer un compte client.'
   });
-
-  res.json({ token: signToken(u), email: u.email, role: u.role, company });
-}));
+});
 
 app.post('/api/auth/login', authLimiter, wrap(async (req, res) => {
   const cleanEmail = (req.body.email || '').trim().toLowerCase();
