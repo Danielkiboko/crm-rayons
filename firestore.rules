@@ -1,0 +1,113 @@
+rules_version = '2';
+
+// =============================================================================
+// Rayons CRM (Firebase project: crm-rayons) — Firestore Security Rules
+// =============================================================================
+//
+// Security Architecture: Server-Only Zero-Trust Lockdown
+// -----------------------------------------------------------------------------
+// - All Cloud Firestore access is performed exclusively server-side by the
+//   trusted Express backend deployed on Cloud Functions for Firebase using the
+//   Firebase Admin SDK (which authenticates via IAM and bypasses these rules).
+// - The React frontend authenticates via custom JWT endpoints (/api/auth/login,
+//   /api/auth/register) on the Express API and NEVER accesses Cloud Firestore
+//   directly from the browser.
+// - Therefore, ALL direct client SDK reads and writes are unconditionally
+//   denied across every collection, document, and subcollection.
+//
+// Assumed Data Model (Managed Exclusively by Backend Admin SDK)
+// -----------------------------------------------------------------------------
+// - tenants/{tenantId}              : Tenant config, plan, status, sender_id,
+//                                     api_key (secret), limits, settings
+// - users/{userId}                  : tenant_id, email (PII), password_hash
+//                                     (secret), role, created_at
+// - contacts/{contactId}            : tenant_id, name, phone, email (PII),
+//                                     tags, notes, created_at
+// - campaigns/{campaignId}          : tenant_id, name, channel, subject, body,
+//                                     status, delivery counters, total_cost
+// - messages/{messageId}            : tenant_id, contact_id, campaign_id,
+//                                     channel, direction, addr, body, status,
+//                                     cost/buy_cost, dlr_code, provider_id
+// - templates/{templateId}          : tenant_id, name, channel, subject, body,
+//                                     metadata, created_at
+// - auto_reply_rules/{ruleId}       : tenant_id, name, keyword, match_type,
+//                                     channel, reply_body, is_active
+// - credit_logs/{logId}             : tenant_id, amount_usd, payment_method,
+//                                     reference, note, created_at
+// - recharge_requests/{requestId}   : tenant_id, amount_usd, payment_method,
+//                                     payer_phone (PII), reference, status
+// - blacklist/{entryId}             : tenant_id, addr (PII), reason, created_at
+// - webhook_logs/{logId}            : tenant_id, operator, event_type, msisdn,
+//                                     dlr_code, raw_payload, created_at
+// - audit_logs/{logId}              : tenant_id, actor_email (PII), action,
+//                                     details, ip_addr (PII), created_at
+// - _rayons_meta/{metaId}           : Internal backend/migration metadata
+//
+// IMPORTANT:
+// If direct client-side Firestore access is ever added in the future, replace
+// the relevant `allow read, write: if false;` block with strict Firebase Auth
+// checks, tenant/RBAC authorization, and create+update schema validators.
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Multi-tenant CRM collections (all access via backend Admin SDK only)
+    match /tenants/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /users/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /contacts/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /campaigns/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /messages/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /templates/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /auto_reply_rules/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /credit_logs/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /recharge_requests/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /blacklist/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /webhook_logs/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /audit_logs/{docId=**} {
+      allow read, write: if false;
+    }
+
+    // Internal backend and migration metadata
+    match /_rayons_meta/{docId=**} {
+      allow read, write: if false;
+    }
+
+    // Default deny catch-all for any other collection or nested path
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
