@@ -1,0 +1,13 @@
+{
+  "name": "rayons-crm",
+  "private": true,
+  "version": "2.2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm --prefix backend install && npm --prefix client install && npm --prefix cpanel install && node scripts/build-hosting.mjs",
+    "start": "node backend/src/index.js"
+  }
+}

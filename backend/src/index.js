@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
@@ -2436,6 +2439,24 @@ app.get('/webhooks/email/unsubscribe', wrap(async (req, res) => {
 </body>
 </html>`);
 }));
+
+const __indexDir = path.dirname(fileURLToPath(import.meta.url));
+const hostingDistDir = path.resolve(__indexDir, '../../hosting-dist');
+const cpanelDistDir = path.join(hostingDistDir, 'cpanel');
+
+if (fs.existsSync(path.join(hostingDistDir, 'index.html'))) {
+  if (fs.existsSync(path.join(cpanelDistDir, 'index.html'))) {
+    app.use('/cpanel', express.static(cpanelDistDir));
+    app.get(['/cpanel', '/cpanel/*'], (req, res) => {
+      res.sendFile(path.join(cpanelDistDir, 'index.html'));
+    });
+  }
+  app.use(express.static(hostingDistDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/webhooks')) return next();
+    res.sendFile(path.join(hostingDistDir, 'index.html'));
+  });
+}
 
 const isCloudFunction = Boolean(process.env.FUNCTION_TARGET || process.env.K_SERVICE);
 

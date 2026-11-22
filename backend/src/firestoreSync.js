@@ -28,12 +28,23 @@ export function getFirestoreDb() {
 
   if (getApps().length === 0) {
     const projectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'crm-rayons';
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    const serviceAccountB64 = (process.env.FIREBASE_SERVICE_ACCOUNT_B64 || '').trim();
+    const serviceAccountJson = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
     const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
-    if (serviceAccountJson) {
+    if (serviceAccountB64) {
+      const decoded = Buffer.from(serviceAccountB64, 'base64').toString('utf8');
       initializeApp({
-        credential: cert(JSON.parse(serviceAccountJson)),
+        credential: cert(JSON.parse(decoded)),
+        projectId
+      });
+    } else if (serviceAccountJson) {
+      const parsed = JSON.parse(serviceAccountJson);
+      if (parsed.private_key) {
+        parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+      }
+      initializeApp({
+        credential: cert(parsed),
         projectId
       });
     } else if (credPath && fs.existsSync(credPath)) {
