@@ -313,6 +313,18 @@ async function runMigrationsAndSeed(execQuery) {
     )
   `);
 
+  await execQuery(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+
   const adminEmail = (process.env.ADMIN_EMAIL || 'admin@rayons.cd').trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
   const existingAdmin = await execQuery("SELECT id, tenant_id FROM users WHERE role='superadmin' LIMIT 1");

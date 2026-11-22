@@ -217,15 +217,20 @@ function QuotaItem({ label, used = 0, max = 1, unit = '', color = 'var(--primary
  * CONNEXION ESPACE CLIENT (UNIQUEMENT LE FORMULAIRE DE CONNEXION)
  * ========================================================================== */
 function ClientLogin({ onDone }) {
+  const [step, setStep] = useState('login'); // 'login' | 'forgot' | 'reset'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const submit = async e => {
+  const submitLogin = async e => {
     e.preventDefault();
     setErr('');
+    setInfo('');
     setLoading(true);
     try {
       const r = await api('/auth/login', {
@@ -242,6 +247,49 @@ function ClientLogin({ onDone }) {
     }
   };
 
+  const submitForgot = async e => {
+    e.preventDefault();
+    setErr('');
+    setInfo('');
+    setLoading(true);
+    try {
+      const r = await api('/auth/forgot-password', {
+        method: 'POST',
+        body: { email: email.trim(), portal: 'client' }
+      });
+      setInfo(r.message);
+      setResetCode('');
+      setNewPassword('');
+      setStep('reset');
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitReset = async e => {
+    e.preventDefault();
+    setErr('');
+    setInfo('');
+    setLoading(true);
+    try {
+      const r = await api('/auth/reset-password', {
+        method: 'POST',
+        body: { email: email.trim(), code: resetCode.trim(), newPassword }
+      });
+      setPassword('');
+      setResetCode('');
+      setNewPassword('');
+      setInfo(r.message);
+      setStep('login');
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <main className="auth-centered">
       <div className="auth-box">
@@ -250,58 +298,231 @@ function ClientLogin({ onDone }) {
           <span>Rayons CRM</span>
         </div>
 
-        <form onSubmit={submit} style={{ marginTop: 22 }}>
-          <div className="field">
-            <label htmlFor="client-email">Adresse email</label>
-            <input
-              id="client-email"
-              name="email"
-              type="email"
-              autoComplete="username"
-              spellCheck={false}
-              enterKeyHint="next"
-              placeholder="nom@entreprise.cd"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required
-            />
+        {info && (
+          <div role="status" className="auth-notice" style={{ marginTop: 18 }}>
+            {info}
           </div>
+        )}
 
-          <div className="field">
-            <label htmlFor="client-password">Mot de passe</label>
-            <div className="pwd-field">
+        {step === 'login' && (
+          <form onSubmit={submitLogin} style={{ marginTop: 22 }}>
+            <div className="field">
+              <label htmlFor="client-email">Adresse email</label>
               <input
-                id="client-password"
-                name="password"
-                type={showPwd ? 'text' : 'password'}
-                autoComplete="current-password"
-                enterKeyHint="done"
-                placeholder="Mot de passe"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
+                id="client-email"
+                name="email"
+                type="email"
+                autoComplete="username"
+                spellCheck={false}
+                enterKeyHint="next"
+                placeholder="nom@entreprise.cd"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
                 required
               />
+            </div>
+
+            <div className="field">
+              <label htmlFor="client-password">Mot de passe</label>
+              <div className="pwd-field">
+                <input
+                  id="client-password"
+                  name="password"
+                  type={showPwd ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  enterKeyHint="done"
+                  placeholder="Mot de passe"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  className="pwd-toggle"
+                  aria-pressed={showPwd}
+                  onClick={() => setShowPwd(v => !v)}
+                >
+                  {showPwd ? 'Masquer' : 'Afficher'}
+                </button>
+              </div>
+            </div>
+
+            <div className="auth-actions-row">
               <button
                 type="button"
-                className="pwd-toggle"
-                aria-pressed={showPwd}
-                onClick={() => setShowPwd(v => !v)}
+                className="auth-link-btn"
+                onClick={() => {
+                  setErr('');
+                  setInfo('');
+                  setStep('forgot');
+                }}
               >
-                {showPwd ? 'Masquer' : 'Afficher'}
+                Mot de passe oublié ?
               </button>
             </div>
-          </div>
 
-          {err && (
-            <div role="alert" className="err-text" style={{ fontSize: 13, marginBottom: 12 }}>
-              {err}
+            {err && (
+              <div role="alert" className="err-text" style={{ fontSize: 13, marginBottom: 12 }}>
+                {err}
+              </div>
+            )}
+
+            <button type="submit" className="primary" style={{ width: '100%' }} disabled={loading}>
+              {loading ? 'Connexion…' : 'Se connecter'}
+            </button>
+          </form>
+        )}
+
+        {step === 'forgot' && (
+          <form onSubmit={submitForgot} style={{ marginTop: 22 }}>
+            <div className="field">
+              <label htmlFor="client-forgot-email">Adresse email du compte</label>
+              <p id="client-forgot-hint" className="field-hint">
+                Un code de réinitialisation à 6 chiffres sera envoyé à cette adresse.
+              </p>
+              <input
+                id="client-forgot-email"
+                name="email"
+                type="email"
+                autoComplete="username"
+                spellCheck={false}
+                enterKeyHint="done"
+                aria-describedby="client-forgot-hint"
+                placeholder="nom@entreprise.cd"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+              />
             </div>
-          )}
 
-          <button type="submit" className="primary" style={{ width: '100%' }} disabled={loading}>
-            {loading ? 'Connexion…' : 'Se connecter'}
-          </button>
-        </form>
+            {err && (
+              <div role="alert" className="err-text" style={{ fontSize: 13, marginBottom: 12 }}>
+                {err}
+              </div>
+            )}
+
+            <button type="submit" className="primary" style={{ width: '100%' }} disabled={loading}>
+              {loading ? 'Envoi…' : 'Envoyer le code'}
+            </button>
+
+            <div className="auth-footer-links">
+              <button
+                type="button"
+                className="auth-link-btn"
+                onClick={() => {
+                  setErr('');
+                  setInfo('');
+                  setStep('login');
+                }}
+              >
+                Retour à la connexion
+              </button>
+            </div>
+          </form>
+        )}
+
+        {step === 'reset' && (
+          <form onSubmit={submitReset} style={{ marginTop: 22 }}>
+            <div className="field">
+              <label htmlFor="client-reset-email">Adresse email</label>
+              <input
+                id="client-reset-email"
+                name="email"
+                type="email"
+                autoComplete="username"
+                spellCheck={false}
+                enterKeyHint="next"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="client-reset-code">Code de vérification</label>
+              <p id="client-otp-hint" className="field-hint">
+                Saisissez le code à 6 chiffres reçu par email.
+              </p>
+              <input
+                id="client-reset-code"
+                name="otp"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="\d{6}"
+                maxLength={6}
+                enterKeyHint="next"
+                aria-describedby="client-otp-hint"
+                className="otp-input"
+                placeholder="000000"
+                value={resetCode}
+                onChange={e => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="client-new-password">Nouveau mot de passe</label>
+              <div className="pwd-field">
+                <input
+                  id="client-new-password"
+                  name="new-password"
+                  type={showPwd ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  minLength={8}
+                  enterKeyHint="done"
+                  placeholder="8 caractères minimum"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  className="pwd-toggle"
+                  aria-pressed={showPwd}
+                  onClick={() => setShowPwd(v => !v)}
+                >
+                  {showPwd ? 'Masquer' : 'Afficher'}
+                </button>
+              </div>
+            </div>
+
+            {err && (
+              <div role="alert" className="err-text" style={{ fontSize: 13, marginBottom: 12 }}>
+                {err}
+              </div>
+            )}
+
+            <button type="submit" className="primary" style={{ width: '100%' }} disabled={loading}>
+              {loading ? 'Mise à jour…' : 'Réinitialiser le mot de passe'}
+            </button>
+
+            <div className="auth-footer-links">
+              <button
+                type="button"
+                className="auth-link-btn"
+                onClick={() => {
+                  setErr('');
+                  setInfo('');
+                  setStep('forgot');
+                }}
+              >
+                Renvoyer un code
+              </button>
+              <button
+                type="button"
+                className="auth-link-btn"
+                onClick={() => {
+                  setErr('');
+                  setInfo('');
+                  setStep('login');
+                }}
+              >
+                Retour à la connexion
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </main>
   );

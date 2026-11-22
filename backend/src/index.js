@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -113,6 +114,130 @@ app.post('/api/auth/login', authLimiter, wrap(async (req, res) => {
   });
 
   res.json({ token: signToken(u), email: u.email, role: u.role, company: t?.name || 'Rayons CRM' });
+}));
+
+app.post('/api/auth/forgot-password', authLimiter, wrap(async (req, res) => {
+  const cleanEmail = String(req.body.email || '').trim().toLowerCase();
+  const portal = String(req.body.portal || 'client').toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ error: 'Veuillez saisir une adresse email valide.' });
+  }
+
+  const neutralResponse = {
+    ok: true,
+    message:
+      'Si cette adresse correspond à un compte actif, un code de réinitialisation à 6 chiffres a été envoyé par email (valable 15 minutes).'
+  };
+
+  const [u] = await q('SELECT id, tenant_id, email, role FROM users WHERE email=$1', [cleanEmail]);
+  if (!u || (portal === 'cpanel' && u.role !== 'superadmin')) {
+    return res.json(neutralResponse);
+  }
+
+  const code = String(crypto.randomInt(100000, 1000000));
+  const codeHash = await bcrypt.hash(code, 10);
+
+  await q('UPDATE password_resets SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [u.id]);
+  await q(
+    `INSERT INTO password_resets(user_id, email, code_hash, expires_at)
+     VALUES($1, $2, $3, now() + interval '15 minutes')`,
+    [u.id, u.email, codeHash]
+  );
+
+  const masterSettings = await getMasterSettings();
+  const envSmtpReady = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  const emailCfg = envSmtpReady
+    ? {
+        emailDirect: {
+          host: process.env.SMTP_HOST,
+          port: process.env.SMTP_PORT || '587',
+          appPassword: process.env.SMTP_PASS,
+          fromName: 'Rayons CRM',
+          replyTo: process.env.SMTP_USER
+        }
+      }
+    : masterSettings;
+  const senderEmail = envSmtpReady
+    ? process.env.SMTP_USER
+    : masterSettings?.emailDirect?.replyTo || 'admin@rayons.cd';
+
+  const portalLabel = portal === 'cpanel' ? 'Console C-Panel' : 'Espace Client Rayons CRM';
+  const mailResult = await senders
+    .email(emailCfg, {
+      to: u.email,
+      subject: `Code de réinitialisation (${code}) — ${portalLabel}`,
+      body:
+        `Bonjour,\n\n` +
+        `Vous avez demandé la réinitialisation du mot de passe de votre compte ${portalLabel}.\n\n` +
+        `Votre code de vérification à 6 chiffres est : ${code}\n\n` +
+        `Ce code expire dans 15 minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet email.`,
+      userEmail: senderEmail,
+      companyName: 'Rayons CRM',
+      tenantId: u.tenant_id
+    })
+    .catch(err => {
+      console.error('[AUTH] Échec envoi email de réinitialisation :', err.message);
+      return { mode: 'error' };
+    });
+
+  if (mailResult?.mode !== 'live') {
+    console.warn(
+      `[AUTH] SMTP non configuré : email de réinitialisation pour ${u.email} généré en mode relais local. Configurez SMTP_HOST/SMTP_USER/SMTP_PASS dans backend/.env ou Email Direct dans le C-Panel pour l'envoi réel.`
+    );
+  }
+
+  await logAudit({
+    tenantId: u.tenant_id,
+    actorEmail: u.email,
+    action: 'PASSWORD_RESET_REQUEST',
+    details: { portal, deliveryMode: mailResult?.mode || 'unknown' },
+    req
+  });
+
+  res.json(neutralResponse);
+}));
+
+app.post('/api/auth/reset-password', authLimiter, wrap(async (req, res) => {
+  const cleanEmail = String(req.body.email || '').trim().toLowerCase();
+  const cleanCode = String(req.body.code || '').replace(/\s+/g, '');
+  const newPassword = String(req.body.newPassword || '');
+
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ error: 'Adresse email invalide.' });
+  }
+  if (!/^\d{6}$/.test(cleanCode)) {
+    return res.status(400).json({ error: 'Le code de réinitialisation doit contenir 6 chiffres.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 8 caractères.' });
+  }
+
+  const [resetRow] = await q(
+    `SELECT id, user_id, email, code_hash
+     FROM password_resets
+     WHERE email=$1 AND used_at IS NULL AND expires_at > now()
+     ORDER BY id DESC
+     LIMIT 1`,
+    [cleanEmail]
+  );
+
+  if (!resetRow || !(await bcrypt.compare(cleanCode, resetRow.code_hash))) {
+    return res.status(400).json({ error: 'Code invalide ou expiré. Demandez un nouveau code.' });
+  }
+
+  const newHash = await bcrypt.hash(newPassword, 10);
+  await q('UPDATE users SET password_hash=$1 WHERE id=$2', [newHash, resetRow.user_id]);
+  await q('UPDATE password_resets SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [resetRow.user_id]);
+
+  const [u] = await q('SELECT tenant_id, email FROM users WHERE id=$1', [resetRow.user_id]);
+  await logAudit({
+    tenantId: u?.tenant_id || null,
+    actorEmail: cleanEmail,
+    action: 'PASSWORD_RESET_COMPLETED',
+    req
+  });
+
+  res.json({ ok: true, message: 'Mot de passe mis à jour. Vous pouvez maintenant vous connecter.' });
 }));
 
 /* ============================================================================

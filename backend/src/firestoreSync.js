@@ -14,7 +14,8 @@ export const FIRESTORE_TABLES = [
   'recharge_requests',
   'blacklist',
   'webhook_logs',
-  'audit_logs'
+  'audit_logs',
+  'password_resets'
 ];
 
 const WRITE_SQL_REGEX = /^\s*(INSERT|UPDATE|DELETE)\b/i;

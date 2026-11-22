@@ -9,9 +9,10 @@ rules_version = '2';
 // - All Cloud Firestore access is performed exclusively server-side by the
 //   trusted Express backend deployed on Cloud Functions for Firebase using the
 //   Firebase Admin SDK (which authenticates via IAM and bypasses these rules).
-// - The React frontend authenticates via custom JWT endpoints (/api/auth/login,
-//   /api/auth/register) on the Express API and NEVER accesses Cloud Firestore
-//   directly from the browser.
+// - The React frontends (Client & C-Panel) authenticate via custom JWT
+//   server-side endpoints (/api/auth/login, /api/auth/forgot-password,
+//   /api/auth/reset-password; note that /api/auth/register is disabled) on
+//   the Express API and NEVER access Cloud Firestore directly from the browser.
 // - Therefore, ALL direct client SDK reads and writes are unconditionally
 //   denied across every collection, document, and subcollection.
 //
@@ -41,6 +42,8 @@ rules_version = '2';
 //                                     dlr_code, raw_payload, created_at
 // - audit_logs/{logId}              : tenant_id, actor_email (PII), action,
 //                                     details, ip_addr (PII), created_at
+// - password_resets/{resetId}       : user_id, email (PII), code_hash (secret),
+//                                     expires_at, used_at, created_at
 // - _rayons_meta/{metaId}           : Internal backend/migration metadata
 //
 // IMPORTANT:
@@ -97,6 +100,10 @@ service cloud.firestore {
     }
 
     match /audit_logs/{docId=**} {
+      allow read, write: if false;
+    }
+
+    match /password_resets/{docId=**} {
       allow read, write: if false;
     }
 
