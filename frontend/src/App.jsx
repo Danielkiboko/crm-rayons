@@ -220,8 +220,8 @@ function Login({ onDone }) {
   const [mode, setMode] = useState('login');
   const [f, setF] = useState({
     company: '',
-    email: 'admin@rayons.cd',
-    password: 'admin1234'
+    email: '',
+    password: ''
   });
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
@@ -233,10 +233,8 @@ function Login({ onDone }) {
     setErr('');
     if (target === 'cpanel') {
       setMode('login');
-      setF({ company: '', email: 'admin@rayons.cd', password: 'admin1234' });
-    } else {
-      setF({ company: '', email: 'client@kivutech.cd', password: 'client1234' });
     }
+    setF({ company: '', email: '', password: '' });
   };
 
   const submit = async customBody => {
@@ -250,26 +248,6 @@ function Login({ onDone }) {
       localStorage.userRole = r.role || 'client';
       localStorage.removeItem('adminTokenBackup');
       onDone(r.role === 'superadmin' && portalChoice === 'cpanel' ? 'cpanel' : 'client');
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const quickLogin = async (email, password, targetPortal) => {
-    setMode('login');
-    setPortalChoice(targetPortal);
-    setF(prev => ({ ...prev, email, password }));
-    setErr('');
-    setLoading(true);
-    try {
-      const r = await api('/auth/login', { method: 'POST', body: { email, password } });
-      localStorage.token = r.token;
-      localStorage.userEmail = r.email || email;
-      localStorage.userRole = r.role || 'client';
-      localStorage.removeItem('adminTokenBackup');
-      onDone(targetPortal);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -427,49 +405,6 @@ function Login({ onDone }) {
                 : 'Créer mon Espace Client'}
             </button>
           </form>
-
-          <div className="quick-accounts">
-            <div className="quick-accounts-title">Accès directs aux 2 parties</div>
-            <div className="quick-account-row">
-              <div>
-                <strong>Partie 1 — Console C-Panel (Super-Admin)</strong>
-                <div className="mute mono">admin@rayons.cd</div>
-              </div>
-              <button
-                type="button"
-                className="sm primary"
-                onClick={() => quickLogin('admin@rayons.cd', 'admin1234', 'cpanel')}
-              >
-                Ouvrir C-Panel
-              </button>
-            </div>
-            <div className="quick-account-row">
-              <div>
-                <strong>Partie 2 — Espace Client (Kivu Tech — Business)</strong>
-                <div className="mute mono">client@kivutech.cd</div>
-              </div>
-              <button
-                type="button"
-                className="sm"
-                onClick={() => quickLogin('client@kivutech.cd', 'client1234', 'client')}
-              >
-                Espace Client 1
-              </button>
-            </div>
-            <div className="quick-account-row">
-              <div>
-                <strong>Partie 2 — Espace Client (Horizon — Starter)</strong>
-                <div className="mute mono">contact@horizon.cd</div>
-              </div>
-              <button
-                type="button"
-                className="sm"
-                onClick={() => quickLogin('contact@horizon.cd', 'client1234', 'client')}
-              >
-                Espace Client 2
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -12,7 +12,6 @@ serviceAccountKey.json
 
 # Local database & build artifacts
 backend/.pgdata/
-backend/supabase_migration.sql
 frontend/dist/
 
 # Firebase & OS

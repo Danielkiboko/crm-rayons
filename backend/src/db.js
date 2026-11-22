@@ -313,25 +313,16 @@ async function runMigrationsAndSeed(execQuery) {
     )
   `);
 
-  const existingRayons = await execQuery('SELECT id, tenant_id FROM users WHERE email=$1', ['admin@rayons.cd']);
-  const existingRelais = await execQuery('SELECT id, tenant_id FROM users WHERE email=$1', ['admin@relais.io']);
+  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@rayons.cd').trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
+  const existingAdmin = await execQuery("SELECT id, tenant_id FROM users WHERE role='superadmin' LIMIT 1");
 
-  let masterTenantId;
-  const adminHash = await bcrypt.hash('admin1234', 10);
-
-  if (existingRayons.length > 0) {
-    masterTenantId = existingRayons[0].tenant_id;
-  } else if (existingRelais.length > 0) {
-    masterTenantId = existingRelais[0].tenant_id;
-    await execQuery(
-      'INSERT INTO users(tenant_id, email, password_hash, role) VALUES($1, $2, $3, $4)',
-      [masterTenantId, 'admin@rayons.cd', adminHash, 'superadmin']
-    );
-  } else {
+  if (existingAdmin.length === 0) {
+    const adminHash = await bcrypt.hash(adminPassword, 10);
     const [tenant] = await execQuery(
       'INSERT INTO tenants(name, plan, status, sender_id, api_key, limits, settings) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING id',
       [
-        'Rayons CRM (Master)',
+        'Rayons CRM',
         'enterprise',
         'active',
         'RAYONS',
@@ -340,170 +331,16 @@ async function runMigrationsAndSeed(execQuery) {
         JSON.stringify(DEFAULT_TELECOM_SETTINGS)
       ]
     );
-    masterTenantId = tenant.id;
-
     await execQuery(
       'INSERT INTO users(tenant_id, email, password_hash, role) VALUES($1, $2, $3, $4)',
-      [masterTenantId, 'admin@rayons.cd', adminHash, 'superadmin']
-    );
-    await execQuery(
-      'INSERT INTO users(tenant_id, email, password_hash, role) VALUES($1, $2, $3, $4)',
-      [masterTenantId, 'admin@relais.io', adminHash, 'superadmin']
+      [tenant.id, adminEmail, adminHash, 'superadmin']
     );
   }
-
-  await execQuery("UPDATE users SET role='superadmin' WHERE email IN ('admin@rayons.cd', 'admin@relais.io')");
 
   // Attribuer une clé API à tous les tenants qui n'en ont pas encore
   const withoutKey = await execQuery('SELECT id FROM tenants WHERE api_key IS NULL');
   for (const row of withoutKey) {
     await execQuery('UPDATE tenants SET api_key=$1 WHERE id=$2', [generateApiKey(), row.id]);
-  }
-
-  // Enrichir les messages existants avec buy_cost, dlr_code, latency_ms s'ils sont nuls
-  await execQuery(`
-    UPDATE messages
-    SET
-      buy_cost = CASE
-        WHEN channel = 'sms' AND cost > 0 THEN ROUND((cost * 0.6)::numeric, 4)
-        WHEN channel = 'whatsapp' AND cost > 0 THEN 0.0050
-        WHEN channel = 'rcs' AND cost > 0 THEN 0.0120
-        ELSE 0
-      END,
-      dlr_code = COALESCE(dlr_code, CASE
-        WHEN status IN ('sent', 'delivered') AND channel != 'email' THEN 'DELIVRD 000'
-        WHEN status = 'received' THEN 'MO_INBOUND'
-        WHEN status = 'sent' AND channel = 'email' THEN '250 2.0.0 OK'
-        ELSE 'ACCEPTD'
-      END),
-      status = CASE
-        WHEN status = 'sent' AND direction = 'out' AND channel IN ('sms', 'whatsapp', 'rcs') THEN 'delivered'
-        ELSE status
-      END,
-      delivered_at = COALESCE(delivered_at, created_at + interval '2 seconds'),
-      latency_ms = CASE WHEN COALESCE(latency_ms, 0) = 0 THEN 42 ELSE latency_ms END
-    WHERE dlr_code IS NULL
-  `);
-
-  // Modèles de messages par défaut s'il n'y en a aucun
-  const tplCount = await execQuery('SELECT count(*)::int AS n FROM templates');
-  if ((tplCount[0]?.n || 0) === 0) {
-    const allTenants = await execQuery('SELECT id, name FROM tenants');
-    for (const t of allTenants) {
-      await execQuery(
-        `INSERT INTO templates(tenant_id, name, channel, subject, body, metadata) VALUES
-         ($1, 'Confirmation de commande', 'sms', NULL, 'Bonjour {{name}}, votre commande auprès de ' || $2 || ' a bien été enregistrée.', '{}'),
-         ($1, 'Relance échéance', 'whatsapp', NULL, 'Bonjour {{name}}, nous vous rappelons que votre facture mensuelle est disponible.', '{}'),
-         ($1, 'Bienvenue client', 'email', 'Bienvenue chez ' || $2, 'Bonjour {{name}},\n\nMerci pour votre confiance. Notre équipe reste disponible pour toute question.', '{"ctaLabel":"Accéder à mon espace","ctaUrl":"https://rayons.cd"}'),
-         ($1, 'Carte Riche Promotion RCS', 'rcs', 'Nouvelle Offre Entreprise', 'Bonjour {{name}}, découvrez notre nouvelle offre dédiée aux entreprises en RDC avec support prioritaire.', '{"cardTitle":"Offre Business RDC","mediaUrl":"https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=800&auto=format&fit=crop&q=80","ctaLabel":"Voir l''offre","ctaUrl":"https://rayons.cd/offres","ctaPhone":"+243810000000","quickReplies":"Confirmer,Être rappelé,Tarifs","smsFallback":true}')`,
-        [t.id, t.name]
-      );
-    }
-  } else {
-    const rcsTplCount = await execQuery("SELECT count(*)::int AS n FROM templates WHERE channel='rcs'");
-    if ((rcsTplCount[0]?.n || 0) === 0) {
-      const allTenants = await execQuery('SELECT id, name FROM tenants');
-      for (const t of allTenants) {
-        await execQuery(
-          `INSERT INTO templates(tenant_id, name, channel, subject, body, metadata) VALUES
-           ($1, 'Carte Riche Promotion RCS', 'rcs', 'Nouvelle Offre Entreprise', 'Bonjour {{name}}, découvrez notre nouvelle offre dédiée aux entreprises en RDC avec support prioritaire.', '{"cardTitle":"Offre Business RDC","mediaUrl":"http://localhost:4000/api/media/animated/pulse-promo.svg","ctaLabel":"Voir l''offre","ctaUrl":"https://rayons.cd/offres","ctaPhone":"+243810000000","quickReplies":"Confirmer,Être rappelé,Tarifs","smsFallback":true,"isAnimated":true}')`,
-          [t.id]
-        );
-      }
-    }
-  }
-
-  // Ajouter les modèles Emailing avec images animées ("images qui bougent") pour chaque compte s'ils n'existent pas encore
-  const animTplCount = await execQuery("SELECT count(*)::int AS n FROM templates WHERE name ILIKE 'Email Animé%'");
-  if ((animTplCount[0]?.n || 0) === 0) {
-    const allTenants = await execQuery('SELECT id FROM tenants');
-    for (const t of allTenants) {
-      await execQuery(
-        `INSERT INTO templates(tenant_id, name, channel, subject, body, metadata) VALUES
-         ($1, 'Email Animé — Offre Flash Entreprise', 'email', 'Offre Prioritaire Entreprise — {{company}}', 'Bonjour {{name}},\n\nProfitez dès aujourd’hui de notre offre prioritaire dédiée aux entreprises opérant à Kinshasa, Lubumbashi et Goma.\n\nVotre compte bénéficie d’un accompagnement dédié et d’une tarification préférentielle.', '{"badgeText":"OFFRE FLASH ANIMÉE","cardTitle":"Activez votre avantage entreprise dès maintenant","mediaUrl":"http://localhost:4000/api/media/animated/pulse-promo.svg","ctaLabel":"Activer mon offre maintenant","ctaUrl":"https://rayons.cd/offres","accentColor":"#1d4ed8","isAnimated":true}'),
-         ($1, 'Email Animé — Confirmation Mobile Money & Facture', 'email', 'Confirmation de paiement & Facture — {{company}}', 'Bonjour {{name}},\n\nNous vous confirmons la bonne réception de votre règlement Mobile Money / Banque. Votre solde et votre facture acquittée sont immédiatement disponibles dans votre espace client.', '{"badgeText":"PAIEMENT VALIDÉ","cardTitle":"Votre transaction a été créditée avec succès","mediaUrl":"http://localhost:4000/api/media/animated/live-payment.svg","ctaLabel":"Télécharger mon reçu officiel","ctaUrl":"https://rayons.cd/factures","accentColor":"#059669","isAnimated":true}'),
-         ($1, 'Email Animé — Suivi de Livraison & Expédition', 'email', 'Votre commande est en route — {{company}}', 'Bonjour {{name}},\n\nVotre expédition vient de quitter notre centre logistique et est actuellement en cours d’acheminement vers votre adresse.\n\nVous pouvez suivre la progression en direct.', '{"badgeText":"EN COURS DE LIVRAISON","cardTitle":"Suivi en temps réel de votre expédition","mediaUrl":"http://localhost:4000/api/media/animated/delivery-radar.svg","ctaLabel":"Suivre mon colis en direct","ctaUrl":"https://rayons.cd/suivi","accentColor":"#4338ca","isAnimated":true}'),
-         ($1, 'Email Animé — Invitation VIP & Événement', 'email', 'Invitation Privilège Partenaire — {{company}}', 'Bonjour {{name}},\n\nNous avons l’honneur de vous convier à notre prochaine session privée consacrée aux nouvelles solutions digitales et télécoms en République Démocratique du Congo.', '{"badgeText":"INVITATION VIP","cardTitle":"Rencontre Partenaires & Démonstration Live","mediaUrl":"http://localhost:4000/api/media/animated/vip-event.svg","ctaLabel":"Confirmer ma participation","ctaUrl":"https://rayons.cd/evenements","accentColor":"#7e22ce","isAnimated":true}')`,
-        [t.id]
-      );
-    }
-  }
-
-  // Historique de rechargement initial si vide
-  const credCount = await execQuery('SELECT count(*)::int AS n FROM credit_logs');
-  if ((credCount[0]?.n || 0) === 0) {
-    const clientTenants = await execQuery("SELECT id, plan FROM tenants WHERE name != 'Rayons CRM (Master)'");
-    for (const ct of clientTenants) {
-      const amt = ct.plan === 'business' ? 150 : 25;
-      await execQuery(
-        `INSERT INTO credit_logs(tenant_id, amount_usd, payment_method, reference, note)
-         VALUES($1, $2, 'M-Pesa Vodacom', $3, 'Activation initiale du forfait')`,
-        [ct.id, amt, `MPESA-${10000 + ct.id}`]
-      );
-    }
-  }
-
-  // Demande de rechargement Mobile Money en attente par défaut si vide
-  const reqCount = await execQuery('SELECT count(*)::int AS n FROM recharge_requests');
-  if ((reqCount[0]?.n || 0) === 0) {
-    const [kivu] = await execQuery("SELECT id FROM tenants WHERE name ILIKE '%Kivu%' LIMIT 1");
-    if (kivu) {
-      await execQuery(
-        `INSERT INTO recharge_requests(tenant_id, amount_usd, payment_method, payer_phone, reference, note, status)
-         VALUES($1, 50.00, 'M-Pesa Vodacom', '+243 81 450 0111', 'MPESA-893420', 'Extension de budget campagne SMS fin de mois', 'pending')`,
-        [kivu.id]
-      );
-    }
-  }
-
-  // Règles d'auto-répondeur par mots-clés par défaut pour chaque tenant
-  const arCount = await execQuery('SELECT count(*)::int AS n FROM auto_reply_rules');
-  if ((arCount[0]?.n || 0) === 0) {
-    const allTenants = await execQuery('SELECT id FROM tenants');
-    for (const t of allTenants) {
-      await execQuery(
-        `INSERT INTO auto_reply_rules(tenant_id, name, keyword, match_type, channel, reply_channel, reply_subject, reply_body, add_tag, is_active, trigger_count)
-         VALUES
-         ($1, 'Demande de Tarifs & Grille B2B', 'TARIFS, PRIX, DEVIS, COUT', 'contains', 'all', 'same', 'Grille Tarifaire — {{company}}', 'Bonjour {{name}}, merci pour votre intérêt envers {{company}}. Nos offres entreprise démarrent dès 25 USD/mois avec routes directes Vodacom, Airtel, Orange et Africell. Un conseiller commercial vous recontacte rapidement.', 'Prospect Chaud', true, 4),
-         ($1, 'Confirmation de Rendez-vous / Commande', 'CONFIRMER, OUI, OK, VALIDER', 'contains', 'all', 'same', 'Confirmation enregistrée — {{company}}', 'Bonjour {{name}}, votre confirmation auprès de {{company}} a bien été enregistrée. Nous vous remercions pour votre confiance.', 'Confirmé', true, 7),
-         ($1, 'Demande de Rappel Téléphonique', 'RAPPEL, ETRE RAPPELE, ÊTRE RAPPELÉ, APPEL', 'contains', 'all', 'same', 'Demande de rappel — {{company}}', 'Bonjour {{name}}, votre demande de rappel a bien été transmise à notre équipe {{company}}. Un conseiller vous contactera sur le {{phone}} dans les plus brefs délais.', 'À rappeler', true, 3),
-         ($1, 'Menu d''Assistance & Aide Client', 'INFO, AIDE, HELP, MENU', 'contains', 'all', 'same', 'Assistance — {{company}}', 'Service Client {{company}} : Répondez TARIFS pour recevoir notre grille tarifaire, CONFIRMER pour valider votre dossier, RAPPEL pour être recontacté par un agent, ou STOP pour vous désabonner.', NULL, true, 5)`,
-        [t.id]
-      );
-    }
-  }
-
-  // Messages entrants (MO 2-Way) de démonstration si aucun message entrant n'existe
-  const inMsgCount = await execQuery("SELECT count(*)::int AS n FROM messages WHERE direction='in'");
-  if ((inMsgCount[0]?.n || 0) === 0) {
-    const allTenants = await execQuery('SELECT id, name, sender_id FROM tenants');
-    for (const t of allTenants) {
-      const contacts = await execQuery(
-        'SELECT id, name, phone, email FROM contacts WHERE tenant_id=$1 ORDER BY id ASC LIMIT 3',
-        [t.id]
-      );
-      if (contacts[0]) {
-        await execQuery(
-          `INSERT INTO messages(tenant_id, contact_id, channel, direction, addr, sender_addr, operator, body, status, dlr_code, provider_id, tx_ref, is_read, created_at)
-           VALUES($1, $2, 'sms', 'in', $3, $3, 'Vodacom RDC', 'Bonjour, pouvez-vous m''envoyer vos TARIFS entreprise pour Kinshasa ?', 'received', 'MO_INBOUND', 'mo-seed-1', $4, false, now() - interval '25 minutes')`,
-          [t.id, contacts[0].id, contacts[0].phone || '+243812345678', `RAY-MO-${t.id}01`]
-        );
-      }
-      if (contacts[1]) {
-        await execQuery(
-          `INSERT INTO messages(tenant_id, contact_id, channel, direction, addr, sender_addr, operator, body, status, dlr_code, provider_id, tx_ref, is_read, created_at)
-           VALUES($1, $2, 'rcs', 'in', $3, $3, 'Airtel RDC (RCS)', 'Être rappelé — Je suis disponible cet après-midi à Lubumbashi.', 'received', 'RBM_REPLY', 'mo-seed-2', $4, false, now() - interval '12 minutes')`,
-          [t.id, contacts[1].id, contacts[1].phone || '+243998765432', `RAY-MO-${t.id}02`]
-        );
-      }
-      if (contacts[2]) {
-        await execQuery(
-          `INSERT INTO messages(tenant_id, contact_id, channel, direction, addr, sender_addr, operator, body, status, dlr_code, provider_id, tx_ref, is_read, created_at)
-           VALUES($1, $2, 'whatsapp', 'in', $3, $3, 'WhatsApp Direct', 'Bonjour, je souhaite CONFIRMER la réception de la facture mensuelle. Merci !', 'received', 'WA_INBOUND', 'mo-seed-3', $4, true, now() - interval '2 hours')`,
-          [t.id, contacts[2].id, contacts[2].phone || '+243844512893', `RAY-MO-${t.id}03`]
-        );
-      }
-    }
   }
 }
 
