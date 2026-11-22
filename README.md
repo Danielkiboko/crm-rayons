@@ -8,7 +8,7 @@ cd ../cpanel && npm i && npm run dev       # Console C-Panel : http://localhost:
 ```
 
 ### Compte administrateur C-Panel par défaut
-- **Email** : `admin@rayons.cd`
+- **Email** : `danielkiboko218@gmail.com`
 - **Mot de passe** : `admin1234`
 
 ## Fonctionnalités clés

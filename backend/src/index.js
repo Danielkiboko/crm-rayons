@@ -159,7 +159,7 @@ app.post('/api/auth/forgot-password', authLimiter, wrap(async (req, res) => {
     : masterSettings;
   const senderEmail = envSmtpReady
     ? process.env.SMTP_USER
-    : masterSettings?.emailDirect?.replyTo || 'admin@rayons.cd';
+    : process.env.RESET_SENDER_EMAIL || 'admin@rayons.net';
 
   const portalLabel = portal === 'cpanel' ? 'Console C-Panel' : 'Espace Client Rayons CRM';
   const mailResult = await senders
@@ -718,7 +718,7 @@ app.get('/api/settings', auth, wrap(async (req, res) => {
   const [u] = await q('SELECT email, role FROM users WHERE id=$1', [req.user.uid]);
   const isSuper = (u?.role || req.user.role) === 'superadmin';
   const masterSettings = await getMasterSettings();
-  const userEmail = u?.email || req.user.email || 'admin@rayons.cd';
+  const userEmail = u?.email || req.user.email || 'danielkiboko218@gmail.com';
   const emailDirect = t?.settings?.emailDirect || masterSettings.emailDirect || {};
   const smtpResolved = resolveSmtpConfig(userEmail, emailDirect);
 
@@ -784,7 +784,7 @@ app.post('/api/email/test-connection', auth, wrap(async (req, res) => {
   const { emailDirectOverride, testRecipient = '', sendTestMail = false } = req.body;
   const [t] = await q('SELECT name, settings FROM tenants WHERE id=$1', [req.user.tid]);
   const [u] = await q('SELECT email FROM users WHERE id=$1', [req.user.uid]);
-  const userEmail = u?.email || req.user.email || 'admin@rayons.cd';
+  const userEmail = u?.email || req.user.email || 'danielkiboko218@gmail.com';
   const masterSettings = await getMasterSettings();
 
   const effectiveCfg = {
@@ -1238,7 +1238,7 @@ app.post('/api/campaigns/launch', auth, wrap(async (req, res) => {
   }
 
   const [u] = await q('SELECT email FROM users WHERE id=$1', [req.user.uid]);
-  const userEmail = u?.email || req.user.email || 'admin@rayons.cd';
+  const userEmail = u?.email || req.user.email || 'danielkiboko218@gmail.com';
   const masterSettings = await getMasterSettings();
   const effectiveCfg = {
     ...masterSettings,
@@ -1487,7 +1487,7 @@ app.post('/api/messages/send', auth, wrap(async (req, res) => {
   }
 
   const [u] = await q('SELECT email FROM users WHERE id=$1', [req.user.uid]);
-  const userEmail = u?.email || req.user.email || 'admin@rayons.cd';
+  const userEmail = u?.email || req.user.email || 'danielkiboko218@gmail.com';
 
   const masterSettings = await getMasterSettings();
   const effectiveCfg = {

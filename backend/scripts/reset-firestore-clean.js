@@ -22,7 +22,7 @@ async function clearCollection(db, name) {
 
 async function main() {
   const fsDb = getFirestoreDb();
-  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@rayons.cd').trim().toLowerCase();
+  const adminEmail = (process.env.ADMIN_EMAIL || 'danielkiboko218@gmail.com').trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
   const now = new Date().toISOString();
 

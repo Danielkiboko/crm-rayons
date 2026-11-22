@@ -163,8 +163,8 @@ export const DEFAULT_TELECOM_SETTINGS = {
     host: '',
     port: '587',
     appPassword: '',
-    fromName: '',
-    replyTo: '',
+    fromName: 'Rayons CRM',
+    replyTo: 'admin@rayons.net',
     signature: 'Cordialement,\nService Client',
     mode: 'auto'
   }
@@ -325,7 +325,7 @@ async function runMigrationsAndSeed(execQuery) {
     )
   `);
 
-  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@rayons.cd').trim().toLowerCase();
+  const adminEmail = (process.env.ADMIN_EMAIL || 'danielkiboko218@gmail.com').trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
   const existingAdmin = await execQuery("SELECT id, tenant_id FROM users WHERE role='superadmin' LIMIT 1");
 

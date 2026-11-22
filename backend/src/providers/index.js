@@ -745,7 +745,7 @@ export const senders = {
   async email(cfg, { to, subject, body, userEmail, companyName, metadata = {}, txRef = '', tenantId = 1 }) {
     const start = Date.now();
     const mailCfg = cfg?.emailDirect || cfg?.smtp || {};
-    const smtp = resolveSmtpConfig(userEmail || mailCfg.user || 'admin@rayons.cd', mailCfg);
+    const smtp = resolveSmtpConfig(userEmail || mailCfg.user || 'danielkiboko218@gmail.com', mailCfg);
     const displayBrand = smtp.fromName || companyName || '';
     const displayFrom = displayBrand ? `${displayBrand} <${smtp.accountEmail}>` : smtp.accountEmail;
     const baseUrl = process.env.PUBLIC_URL || 'http://localhost:4000';
